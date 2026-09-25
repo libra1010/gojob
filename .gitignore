@@ -1,0 +1,40 @@
+# 构建产物与本地二进制
+/bin/
+/dist/
+/out/
+*.exe
+
+# 前端
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.vite/
+
+# Java SDK 构建产物（mvn 输出，不进版本库）
+sdk-java/**/target/
+sdk-java/.mvn/wrapper/maven-wrapper.jar
+
+# 本地数据库与运行时数据：sqlite 主库/WAL/shm、验收脚本残留的 *.db
+# 这些文件里有项目的 bcrypt 口令与真实任务数据，任何情况下都不许提交。
+/data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+
+# 环境变量：只提交 .env.example
+.env
+.env.*
+!.env.example
+
+# 日志与临时文件
+*.log
+*.tmp
+*.pid
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+.vscode/
+
+# 内部工作文档（规格与逐期决策记录），不对外发布
+/.qoder/

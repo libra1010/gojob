@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.gojob</groupId>
+  <artifactId>gojob-worker-parent</artifactId>
+  <version>0.2.0</version>
+  <packaging>pom</packaging>
+
+  <name>gojob-worker-parent</name>
+  <description>
+    Java Worker SDK for gojob (Go rewrite of PowerJob). Parent aggregator for the core SDK,
+    the Spring Boot starter and examples. Talks the gojob HTTP+JSON worker protocol.
+  </description>
+
+  <modules>
+    <module>gojob-worker-core</module>
+    <module>gojob-worker-spring-boot-starter</module>
+    <module>examples/quarkus-worker</module>
+  </modules>
+
+  <properties>
+    <maven.compiler.release>17</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+    <okhttp.version>4.12.0</okhttp.version>
+    <jackson.version>2.17.2</jackson.version>
+    <slf4j.version>2.0.13</slf4j.version>
+    <spring-boot.version>3.2.10</spring-boot.version>
+    <quarkus.version>3.15.1</quarkus.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>com.gojob</groupId>
+        <artifactId>gojob-worker-core</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.gojob</groupId>
+        <artifactId>gojob-worker-spring-boot-starter</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.squareup.okhttp3</groupId>
+        <artifactId>okhttp</artifactId>
+        <version>${okhttp.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-databind</artifactId>
+        <version>${jackson.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-api</artifactId>
+        <version>${slf4j.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-simple</artifactId>
+        <version>${slf4j.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-autoconfigure</artifactId>
+        <version>${spring-boot.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-configuration-processor</artifactId>
+        <version>${spring-boot.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.quarkus</groupId>
+        <artifactId>quarkus-arc</artifactId>
+        <version>${quarkus.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.quarkus</groupId>
+        <artifactId>quarkus-core</artifactId>
+        <version>${quarkus.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>3.13.0</version>
+          <configuration>
+            <release>17</release>
+          </configuration>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+</project>
