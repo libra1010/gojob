@@ -86,6 +86,9 @@ watch(
       if (!props.job) form.job_name = `${src.job_name}_copy`
     }
     advanced.value = []
+    // 脚本任务：打开时按已存的任务参数决定展示哪个脚本入口
+    scriptSource.value = isShellJob.value ? detectScriptSource(form.job_params) : 'inline'
+    if (scriptSource.value === 'library') fillScriptLib(form.job_params)
     formRef.value?.clearValidate()
   },
 )
@@ -160,7 +163,7 @@ function validateDaily(): string | null {
   return null
 }
 
-/** 时间类型：对齐 PowerJob TimeExpressionType */
+/** 时间类型：与兼容协议 TimeExpressionType 同值 */
 const timeTypes = [
   { value: 'CRON', label: 'CRON', hint: '支持 5/6 段 cron，如 0 0/5 * * * ?（每 5 分钟）' },
   {
@@ -181,7 +184,7 @@ const timeTypes = [
   {
     value: 'DEPENDENCY',
     label: '依赖触发（上游任务成功）',
-    hint: '不按时间调度：选定一个上游任务，它的一次执行成功后自动触发本任务运行一次（gojob 扩展，PowerJob 用工作流表达依赖）',
+    hint: '不按时间调度：选定一个上游任务，它的一次执行成功后自动触发本任务运行一次（gojob 扩展；兼容协议里这类需求用工作流表达）',
   },
   { value: 'API', label: 'API', hint: '不自动调度，仅通过「触发」按钮或 OpenAPI 运行' },
 ]
@@ -205,7 +208,7 @@ const exprPlaceholder = computed(() =>
           : '如 0 0/5 * * * ?',
 )
 
-// ---------- 每日固定间隔：结构化输入，序列化为 PowerJob DailyTimeIntervalExpress JSON ----------
+// ---------- 每日固定间隔：结构化输入，序列化为 DailyTimeIntervalExpress JSON ----------
 const dayOptions = [
   { v: 1, label: '周一' },
   { v: 2, label: '周二' },
@@ -312,7 +315,7 @@ async function onPreview() {
   }
 }
 
-/** 执行类型：与 PowerJob ExecuteType 同值同名；WORKFLOW 需要工作流引擎，gojob 未实现故禁用 */
+/** 执行类型：与兼容协议 ExecuteType 同值同名；WORKFLOW 需要工作流引擎，gojob 未实现故禁用 */
 const executeTypes = [
   { value: 'STANDALONE', label: '单机（STANDALONE）', disabled: false },
   { value: 'BROADCAST', label: '广播（BROADCAST）', disabled: false },
@@ -329,33 +332,102 @@ const executeHints: Record<string, string> = {
 }
 /** 需要处理器实现 map/reduce 接口的类型 */
 const mapLike = (t: string) => t === 'MAP' || t === 'MAP_REDUCE'
-/** 处理器类型：与 PowerJob 的 ProcessorType 同值同名（SHELL/PYTHON 在其 5.x 已废弃，见下） */
+/** 处理器类型：与兼容协议 ProcessorType 同值同名（SHELL/PYTHON 在其 5.x 已废弃，见下） */
 const processorTypes = [
   { value: 'BUILT_IN', label: '内建（BUILT_IN）' },
   { value: 'EXTERNAL', label: '外置（动态加载）（EXTERNAL）' },
 ]
 
 /**
- * 处理器信息输入框的占位提示，逐字照搬 PowerJob 控制台 5.1.2 的 verifyPlaceholder 与其 i18n 文案。
- * PowerJob 那份还留着 SHELL/PYTHON 两个分支（下拉里已注释掉，永远选不到）；我们不必复刻死分支：
+ * 处理器信息输入框的占位提示沿用兼容协议控制台 5.1.2 的 verifyPlaceholder 文案。
+ * 那份还留着 SHELL/PYTHON 两个分支（下拉里永远选不到）；我们不复刻死分支：
  * 导入到这两种类型时 Server 会明确改写（SHELL → 官方脚本处理器）或拒绝（PYTHON）。
  */
 function processorPlaceholder(type: string): string {
   switch (type) {
     case 'EXTERNAL':
-      return '容器ID#全限定类名，eg：1#tech.powerjob.HelloWordProcessor'
+      return '容器ID#全限定类名，eg：1#com.example.HelloProcessor'
     default:
-      return '全限定类名，eg：tech.powerjob.HelloWordProcessor'
+      return '全限定类名，eg：com.example.hello.HelloProcessor'
   }
 }
 const logLevels = ['DEBUG', 'INFO', 'WARN', 'ERROR', 'OFF']
 
-/** 分发策略：1/2/11 与 PowerJob DispatchStrategy 同值，21 为 gojob 扩展 */
+// ---------- Shell 脚本任务：脚本正文/脚本库文件名仍然存进 job_params ----------
+//
+// 执行节点上的脚本处理器读的是「执行参数」（实例参数优先，否则任务参数），所以这里
+// 不新增字段，只是把那一串文本拆成人类看得懂的两个入口：脚本库文件名（+命令行参数）
+// 或脚本文本本身。两条路写回的都是 form.job_params，导出到兼容格式时语义不变。
+const SHELL_PROCESSOR = 'tech.powerjob.official.processors.impl.script.ShellProcessor'
+const SHELL_ALIASES = new Set([SHELL_PROCESSOR.toLowerCase(), 'shell'])
+const isShellJob = computed(
+  () =>
+    form.processor_type === 'BUILT_IN' &&
+    SHELL_ALIASES.has(form.processor.trim().toLowerCase()),
+)
+
+type ScriptSource = 'library' | 'inline'
+const scriptSource = ref<ScriptSource>('inline')
+const scriptLib = reactive({ name: '', args: '' })
+
+/**
+ * 回填时判断已存的 job_params 是"脚本库文件名 + 参数"还是"脚本文本"。
+ * 这两者在文本层面确实可能撞车（echo hi 既像文件名带参数，也像一行脚本），所以判定
+ * 只用于决定默认展示哪个入口：无论选哪个，脚本库模式都会把内容原样拼回 job_params，
+ * 来回编辑不会改坏任务。含换行、含下载地址前缀、或带 shell 元字符的按脚本文本处理。
+ */
+function detectScriptSource(raw: string): ScriptSource {
+  const t = raw.trim()
+  if (!t) return 'inline'
+  if (/^(https?|ftp):\/\//i.test(t) || t.includes('\n')) return 'inline'
+  if (/[;|&<>()`$"'*{}]/.test(t)) return 'inline'
+  const m = /^(\S+)\s+(.*)$/.exec(t)
+  return m && /[;|&<>()`$"'*{}]/.test(m[2]) ? 'inline' : 'library'
+}
+
+/** 把已存的 job_params 拆进脚本库输入框（name 取第一个词，其余原样保留） */
+function fillScriptLib(raw: string) {
+  const t = raw.trim()
+  const m = /^(\S+)\s+([\s\S]*)$/.exec(t)
+  scriptLib.name = m ? m[1] : t
+  scriptLib.args = m ? m[2].trim() : ''
+}
+
+/** 脚本库模式下的 job_params 序列化结果：文件名 + 空格 + 参数 */
+function libParams(): string {
+  const name = scriptLib.name.trim()
+  const args = scriptLib.args.trim()
+  return args ? `${name} ${args}` : name
+}
+
+// 脚本库模式的两个输入框实时写回 job_params（后端只认这一个字段）
+watch(
+  () => [isShellJob.value, scriptSource.value, scriptLib.name, scriptLib.args] as const,
+  () => {
+    if (isShellJob.value && scriptSource.value === 'library') form.job_params = libParams()
+  },
+)
+
+/** 切到脚本库模式时，把已存的文本拆成文件名 + 参数 */
+function onScriptSourceChange(source: ScriptSource) {
+  if (source === 'library') fillScriptLib(form.job_params)
+}
+
+/** 一键把处理器类名填成官方脚本处理器，省得手敲类全名 */
+function useShellProcessor() {
+  form.processor_type = 'BUILT_IN'
+  form.processor = SHELL_PROCESSOR
+  scriptSource.value = detectScriptSource(form.job_params)
+  if (scriptSource.value === 'library') fillScriptLib(form.job_params)
+  if (!form.execute_type) form.execute_type = 'STANDALONE'
+}
+
+/** 分发策略：1/2/11 与兼容协议 DispatchStrategy 同值，21 为 gojob 扩展 */
 const strategies = [
   {
     value: 1,
     label: '健康优先（HEALTH_FIRST）',
-    hint: '按 (内存上限−已用)×2 + (可用核数−CPU负载) 取分数最高的在线节点，同 PowerJob 打分公式',
+    hint: '按 (内存上限−已用)×2 + (可用核数−CPU负载) 取分数最高的在线节点（沿用兼容协议的打分公式）',
   },
   { value: 2, label: '随机（RANDOM）', hint: '候选节点中随机选一台' },
   {
@@ -366,7 +438,7 @@ const strategies = [
   {
     value: 21,
     label: '轮询（ROUND_ROBIN）· gojob 扩展',
-    hint: '按任务游标依次分发，实现 A→B→A 严格轮流执行；PowerJob 无此策略',
+    hint: '按任务游标依次分发，实现 A→B→A 严格轮流执行；兼容协议无此策略',
   },
 ]
 const isSpecify = computed(() => form.dispatch_strategy === 11)
@@ -405,6 +477,10 @@ async function onSubmit() {
   if (isDaily.value) form.time_expression = dailyToExpr()
   // 依赖关系只在「依赖触发」这一种调度方式下存在，切换类型时一并清掉
   if (!isDependency.value) form.upstream_job_id = 0
+  if (isShellJob.value && scriptSource.value === 'library' && !scriptLib.name.trim()) {
+    ElMessage.warning('请填写脚本库里的脚本文件名，或把「脚本来源」改成内联脚本')
+    return
+  }
   const ok = await formRef.value?.validate().catch(() => false)
   if (!ok) return
   submitting.value = true
@@ -520,16 +596,21 @@ async function onSubmit() {
         </el-col>
       </el-row>
       <el-form-item label="处理器类名" prop="processor">
-        <el-input v-model="form.processor" :placeholder="processorPlaceholder(form.processor_type)" />
+        <div class="expr-row">
+          <el-input v-model="form.processor" :placeholder="processorPlaceholder(form.processor_type)" />
+          <el-button @click="useShellProcessor">跑 Shell 脚本</el-button>
+        </div>
         <div class="hint">
           gojob 的 BUILT_IN 除类全名外还认 worker 的注册短名（如 hello）。
           <template v-if="form.processor_type === 'EXTERNAL'">
             gojob 的 worker 不做 JAR 动态加载，选此项任务会直接被 worker 判失败。
           </template>
+          <template v-else-if="isShellJob">
+            这是一个脚本任务：脚本在下方「脚本内容」里录入，由执行节点（gojob-agent）落盘后用
+            /bin/sh 执行。
+          </template>
           <template v-else>
-            跑 Shell 脚本：处理器类名填
-            <code>tech.powerjob.official.processors.impl.script.ShellProcessor</code>
-            （或短名 shell），脚本正文写在“任务参数”里，由 gojob-agent 执行。
+            想直接跑 Shell 脚本（无需写代码）：点右侧「跑 Shell 脚本」，脚本正文写在下面的输入框里。
           </template>
         </div>
       </el-form-item>
@@ -620,15 +701,54 @@ async function onSubmit() {
         </el-form-item>
         <div class="hint">只在所选星期的「开始~结束」时间窗内按间隔触发；窗口外的时刻顺延到下一个有效日的窗口起点。</div>
       </div>
-      <el-form-item label="任务参数" prop="job_params">
+      <template v-if="isShellJob">
+        <el-form-item label="脚本来源">
+          <el-radio-group v-model="scriptSource" @change="onScriptSourceChange">
+            <el-radio-button value="library">脚本库文件名</el-radio-button>
+            <el-radio-button value="inline">内联脚本</el-radio-button>
+          </el-radio-group>
+          <div class="hint">
+            脚本库模式只执行执行节点上 GOJOB_AGENT_SCRIPT_DIR 目录里预置的脚本（默认，更安全）；
+            内联模式把脚本正文本身当作参数下发并落盘执行，需要执行节点显式开启
+            <code>GOJOB_AGENT_ALLOW_INLINE_SCRIPTS=true</code>。
+          </div>
+        </el-form-item>
+        <el-row v-if="scriptSource === 'library'" :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="脚本文件名">
+              <el-input v-model="scriptLib.name" placeholder="脚本库目录下的文件名，如 backup.sh" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="命令行参数">
+              <el-input v-model="scriptLib.args" placeholder="可选，空格分隔，如 prod 3" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-form-item v-else label="脚本内容">
+          <el-input
+            v-model="form.job_params"
+            type="textarea"
+            :rows="10"
+            class="mono"
+            placeholder="#!/bin/sh&#10;set -e&#10;echo &quot;hello from gojob&quot;"
+          />
+          <div class="hint">
+            这段文本会原样存进任务参数（脚本处理器读的就是它），执行时写成
+            <code>shell_实例ID.sh</code> 并以 /bin/sh 执行；填 http/https 地址则先下载再执行。
+            注意：拿到项目口令的人即可在此写入脚本并在执行节点上运行——内联脚本请只用于隔离网络。
+          </div>
+        </el-form-item>
+      </template>
+      <el-form-item v-else label="任务参数" prop="job_params">
         <el-input
           v-model="form.job_params"
           type="textarea"
           :rows="3"
-          placeholder="发给处理器的静态参数：业务处理器一般约定 JSON，如 {&quot;days&quot;:7}；官方脚本处理器在这里填脚本正文"
+          placeholder="发给处理器的静态参数：业务处理器一般约定 JSON，如 {&quot;days&quot;:7}；脚本任务的脚本正文在这里填"
         />
         <div class="hint">
-          后端不校验格式（与 PowerJob 一致），由处理器自己解释这一串文本。
+          后端不校验格式，由处理器自己解释这一串文本。
           触发时传的实例参数优先于任务参数，两者都为空时脚本处理器会直接判失败。
         </div>
       </el-form-item>
@@ -639,6 +759,9 @@ async function onSubmit() {
           :rows="3"
           placeholder="每次触发的默认运行时参数（instanceParams），可被手动触发时覆盖"
         />
+        <div v-if="isShellJob" class="hint">
+          脚本处理器取参数时实例参数优先：这里非空会整段替代上面的脚本来源，请留空或明确知道自己在做什么。
+        </div>
       </el-form-item>
 
       <el-collapse v-model="advanced" class="advanced">
@@ -775,5 +898,10 @@ async function onSubmit() {
 }
 .expr-row .el-input {
   flex: 1;
+}
+.mono :deep(textarea) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
 }
 </style>

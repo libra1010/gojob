@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	rand "math/rand/v2"
 	"net/http"
 	"os"
 	"runtime"
@@ -24,6 +25,7 @@ import (
 	v2 "encoding/json/v2"
 
 	"gojob/internal/protocol"
+	"gojob/internal/registercrypto"
 )
 
 // sdkVersion 上报给服务端的本 SDK 版本（心跳与注册共用）。
@@ -32,19 +34,19 @@ const defaultTokenTTL = 10 * time.Minute
 
 const sdkVersion = "gojob-go/0.2"
 
-// TaskContext 传给处理器的执行上下文（对标 PowerJob 的 JobContext 子集）。
+// TaskContext 传给处理器的执行上下文（对标兼容协议的 JobContext 子集）。
 type TaskContext struct {
 	context.Context
 	TaskID         uint64
 	JobID          uint64
 	InstanceID     uint64
 	JobParams      string // 创建 Job 时配置的静态参数（JSON 字符串）
-	InstanceParams string // 单次触发传入的运行时参数（PowerJob instanceParams 语义）
+	InstanceParams string // 单次触发传入的运行时参数（兼容协议的 instanceParams 语义）
 	Attempts       int    // 第几次尝试，从 1 开始
 
 	// 多任务形态（BROADCAST/MAP/MAP_REDUCE）才非默认值：TaskKey 是层次 ID（"0"、"0.3"、
 	// reduce 是 "9999"），TaskName 是 map() 的第二参，ExecuteType 决定能不能再派生子任务。
-	// 对应 PowerJob TaskContext 的 getTaskId()/getTaskName() 与 isRootTask() 的判据。
+	// 对应兼容协议 TaskContext 的 getTaskId()/getTaskName() 与 isRootTask() 的判据。
 	TaskKey     string
 	TaskName    string
 	ExecuteType string
@@ -61,7 +63,7 @@ type TaskContext struct {
 // Processor 业务处理器接口（对标 BasicProcessor）。
 //
 // 返回值只有 error：成功时如需给实例/reduce 留一份结果，调 ctx.SetResult。
-// 这是刻意与 PowerJob 的 ProcessResult 分道扬镳的一处——Go 里 error 已经承载了"失败+原因"，
+// 这是刻意与兼容协议的 ProcessResult 分道扬镳的一处——Go 里 error 已经承载了"失败+原因"，
 // 再包一层结构体只会让 90% 的处理器写成 return ProcessResult.success(null)。
 type Processor interface {
 	Process(ctx *TaskContext) error
@@ -99,6 +101,11 @@ type Config struct {
 	HeartbeatSeconds int    // 默认 5
 	MaxWaitSeconds   int    // 长轮询阻塞时长，默认 30
 	Tag              string // 机器标签，供 SPECIFY 分发策略 tagIn/tagEquals 匹配
+	// AesKey 注册口令加密的 key（64 位 hex，AES-256），须与服务端 GOJOB_WORKER_AES_KEYS
+	// 中的某一把一致。配了它，项目口令就不再出现在链路上（注册走一次性 challenge +
+	// AES-256-GCM，见 worker/registercipher.go）；留空则口令明文送上来。
+	// 配了 key 而服务端未启用加密 ⇒ 注册失败并指出是哪一侧没配，不会静默退回明文。
+	AesKey string
 }
 
 func (c *Config) applyDefaults() {
@@ -150,6 +157,7 @@ type Worker struct {
 	memMaxMB     float64       // 本机/容器内存上限，0=未知
 	cpuCores     int           // 可用核数
 	sem          chan struct{} // 并发额度
+	slotFree     chan struct{} // 缓冲 1：任一任务释放额度时 poke 一下，见 pollLoop
 	receiving    atomic.Bool   // false=停止接收新任务（优雅下线中）
 	client       *client
 	logs         *logSender
@@ -190,6 +198,7 @@ func New(cfg Config) *Worker {
 		memMaxMB:   memoryTotalMB(),
 		cpuCores:   usableCores(),
 		sem:        make(chan struct{}, cfg.MaxConcurrency),
+		slotFree:   make(chan struct{}, 1),
 		client:     newClient(servers),
 	}
 	w.logs = newLogSender(w)
@@ -233,7 +242,7 @@ func (w *Worker) Run(ctx context.Context) error {
 	w.receiving.Store(true)
 	log.Printf("gojob worker starting: app=%s addr=%s servers=%v", w.cfg.AppId, w.cfg.Address, w.servers)
 	// 口令只在注册这一刻出场；换到 token 后所有数据面请求都不再带口令
-	if err := w.register(ctx); err != nil {
+	if err := w.registerAtStartup(ctx); err != nil {
 		return fmt.Errorf("worker register failed: %w", err)
 	}
 	w.beat(ctx) // 先注册再开拉取，避免首次 fetch 撞上"无存活节点"
@@ -249,6 +258,57 @@ func (w *Worker) Run(ctx context.Context) error {
 	return nil
 }
 
+// registerGiveUp 启动期注册对"连不上"的止损时间：服务端还没起来、网络抖一下都不该让
+// 节点永久缺席，但一直连不上的环境也不该无限等下去——到点把最后一次的错误抛回调用方。
+const registerGiveUp = 2 * time.Minute
+
+// registerAtStartup 是 Run() 的第一步：注册失败时按"服务端答没答"分类处理。
+//
+//   - 服务端明确拒绝（口令不对、要求加密注册、没配 key）：重试不会让它变对，立即失败。
+//   - 连不上（reset / refused / 超时）：退避重试。
+//
+// 为什么必须有第二条：注册是整条链路上唯一要过 bcrypt 的请求（校验项目口令），
+// 一次几十毫秒 CPU。整池 worker 同时冷启动时，服务端的 accept 队列会被打满——
+// 实测 200 节点同机启动，本机 kern.ipc.somaxconn=128，每轮稳定有 6~23 个节点
+// 在 /worker/register 上吃到 connection reset。SDK 若就此退出，这些节点永久不上线，
+// 而现场看起来"调度没问题"（其余节点跑得好好的），是最难发现的那一类故障。
+// 退避带抖动：整池节点是同时启动的，不错峰就会在每个阶梯上再撞一次队列。
+func (w *Worker) registerAtStartup(ctx context.Context) error {
+	ladder := []time.Duration{200 * time.Millisecond, time.Second, 2 * time.Second, 5 * time.Second}
+	deadline := time.Now().Add(registerGiveUp)
+	for attempt := 0; ; attempt++ {
+		err := w.register(ctx)
+		if err == nil {
+			if attempt > 0 {
+				log.Printf("gojob worker: 注册在第 %d 次尝试后成功", attempt+1)
+			}
+			return nil
+		}
+		var se *serverError
+		if errors.As(err, &se) {
+			return err // 服务端答了，只是答"不行"：不重试
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		left := time.Until(deadline)
+		if left <= 0 {
+			return fmt.Errorf("注册持续连不上（重试 %d 次，超过 %v 止损）: %w", attempt+1, registerGiveUp, err)
+		}
+		wait := ladder[min(attempt, len(ladder)-1)]
+		wait += rand.N(wait / 2)
+		if wait > left {
+			wait = left
+		}
+		log.Printf("gojob worker: 注册连不上(%v)，%v 后重试", err, wait.Round(time.Millisecond))
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(wait):
+		}
+	}
+}
+
 // ---------- 数据面凭证 ----------
 
 func (w *Worker) currentToken() string {
@@ -257,13 +317,25 @@ func (w *Worker) currentToken() string {
 	return w.token
 }
 
-// register 用配置里的项目口令换一张新 token。
+// register 用配置里的项目口令换一张新 token。配了 AesKey 时口令不再明文上线，
+// 改走"一次性 challenge + AES-256-GCM"握手（见 registercipher.go）。
 func (w *Worker) register(ctx context.Context) error {
-	resp, err := post[protocol.RegisterResp](w.client, ctx, "/worker/register", &protocol.RegisterReq{
-		InstanceId: w.instanceID, AppId: w.cfg.AppId, Password: w.cfg.Password,
+	req := &protocol.RegisterReq{
+		InstanceId: w.instanceID, AppId: w.cfg.AppId,
 		Address: w.cfg.Address, Version: sdkVersion, SdkType: "GO",
-	})
+	}
+	if w.cfg.AesKey == "" {
+		req.AuthScheme, req.Password = registercrypto.SchemePlain, w.cfg.Password
+	} else if err := w.sealRegister(ctx, req); err != nil {
+		return err
+	}
+	resp, err := post[protocol.RegisterResp](w.client, ctx, "/worker/register", req)
 	if err != nil {
+		var se *serverError
+		if errors.As(err, &se) && se.Code == protocol.CodeChallengeRequired {
+			// 服务端只接受加密注册，而本节点发的是明文——原因在配置，不在口令。
+			return fmt.Errorf("%w（服务端已强制加密注册，请给 worker.Config.AesKey 配一把与服务端一致的 key）", err)
+		}
 		return err
 	}
 	ttl := time.Duration(resp.Data.TtlSeconds) * time.Second
@@ -274,7 +346,8 @@ func (w *Worker) register(ctx context.Context) error {
 	w.token, w.tokenTTL = resp.Data.Token, ttl
 	w.tokenExpire = time.Now().Add(ttl)
 	w.tokMu.Unlock()
-	log.Printf("worker token issued for instance %s (ttl %ds)", w.instanceID, resp.Data.TtlSeconds)
+	log.Printf("worker token issued for instance %s (ttl %ds, encrypted=%t)",
+		w.instanceID, resp.Data.TtlSeconds, req.AuthScheme == registercrypto.SchemeAesGcm)
 	return nil
 }
 
@@ -327,12 +400,24 @@ func call[T any](w *Worker, ctx context.Context, path string, body protocol.Work
 // Run 便捷入口：New + Run。
 func Run(ctx context.Context, cfg Config) error { return New(cfg).Run(ctx) }
 
+// heartbeatLoop 心跳循环，间隔带 ±25% 相位抖动。
+//
+// 抖动不是装饰：心跳是 worker 侧唯一高频写库的请求（每节点每跳 upsert 一行 worker_nodes）。
+// 一整池节点同时冷启动（compose up / k8s 滚动发布）后，它们会永远同相位，每 5 秒
+// **齐射**一次。sqlite 只有一个写者，实测 200 节点时单条心跳 upsert 被排到 237~338ms
+// （服务端日志直接打成 SLOW SQL），而任务认领同样是写事务，排在它后面就被顶到 1 秒开外
+// ——广播的 p50 从 60ms 变成整轮 1s。把相位打散，齐射就摊成匀速。
 func (w *Worker) heartbeatLoop(ctx context.Context) {
-	t := time.NewTicker(time.Duration(w.cfg.HeartbeatSeconds) * time.Second)
-	defer t.Stop()
+	interval := time.Duration(w.cfg.HeartbeatSeconds) * time.Second
 	for {
+		wait := interval
+		if interval >= 2*time.Second { // 间隔短到这个量级就别抖（rand.N(0) 会 panic）
+			wait += rand.N(interval/2) - interval/4
+		}
+		t := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
+			t.Stop()
 			return
 		case <-t.C:
 		}
@@ -421,10 +506,17 @@ func (w *Worker) pollLoop(ctx context.Context) {
 			continue
 		}
 		if len(w.sem) == cap(w.sem) { // 无空余并发额度
+			// 睡到"有额度了"为止，1s 只是兜底。原先是死睡 1 秒：一台 16 额度的节点
+			// 排 200 个 50ms 的任务，就要在批次之间白等 12 次 × 1s，实测整轮 11s；
+			// 改成事件驱动后同一场景 0.7s 量级（见 README「容量实机数字」）。
+			t := time.NewTimer(time.Second)
 			select {
 			case <-ctx.Done():
+				t.Stop()
 				return
-			case <-time.After(time.Second):
+			case <-w.slotFree:
+				t.Stop()
+			case <-t.C:
 			}
 			continue
 		}
@@ -465,7 +557,16 @@ func (w *Worker) execute(ctx context.Context, task protocol.TaskDTO) {
 	w.sem <- struct{}{}
 	w.running.Add(1)
 	go func() {
-		defer func() { <-w.sem; w.running.Done() }()
+		defer func() {
+			<-w.sem
+			// 额度一释放就喊一声：pollLoop 那台"没额度就不发 fetch"的等待靠它醒来，
+			// 不用固定再睡 1 秒（缓冲 1 + 非阻塞发：多次释放合并成一次唤醒即可）
+			select {
+			case w.slotFree <- struct{}{}:
+			default:
+			}
+			w.running.Done()
+		}()
 		// 每个任务一条可取消 ctx：服务端的停止指令经 cancelTasks 打到这里
 		tctx, cancel := context.WithCancel(ctx)
 		w.tasks.Store(task.TaskId, cancel)
@@ -516,7 +617,7 @@ func (w *Worker) execute(ctx context.Context, task protocol.TaskDTO) {
 			report.Result = err.Error()
 			log.Printf("task %d failed: %v", task.TaskId, err)
 		default:
-			// 没调 SetResult 就是空串：PowerJob 的 ProcessResult.msg 同样允许为空
+			// 没调 SetResult 就是空串：兼容协议的 ProcessResult.msg 同样允许为空
 			report.Result = result
 		}
 		rctx, cancel3 := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
@@ -570,7 +671,7 @@ func (w *Worker) reportWithRetry(ctx context.Context, report protocol.ReportTask
 
 // runProcessor 执行一个任务，返回"要上报的结果文本"与错误。
 //
-// reduce 任务（PowerJob 的 OMS_LAST_TASK）走单独一条分支：先取满全部子任务结果，
+// reduce 任务（兼容协议的 OMS_LAST_TASK）走单独一条分支：先取满全部子任务结果，
 // 再调处理器的 Reduce。处理器没实现 Reducer 就明确报错——静默跳过等于实例凭空变绿。
 func (w *Worker) runProcessor(ctx context.Context, task protocol.TaskDTO, logger *taskLogger) (result string, err error) {
 	defer func() {
@@ -578,11 +679,11 @@ func (w *Worker) runProcessor(ctx context.Context, task protocol.TaskDTO, logger
 			err = fmt.Errorf("processor panic: %v", r)
 		}
 	}()
-	// EXTERNAL 在 PowerJob 里意味着"去 JAR 动态容器里按 容器ID#类名 加载"，gojob 没有对应实现。
-	// 早一步说清楚，比报"没注册"更好排查（对标 PowerJob 的 "fetch Processor failed, please
+	// EXTERNAL 在兼容协议里意味着"去 JAR 动态容器里按 容器ID#类名 加载"，gojob 没有对应实现。
+	// 早一步说清楚，比报"没注册"更好排查（兼容协议的那句 "fetch Processor failed, please
 	// check your processorType and processorInfo config"）。
 	if task.ProcessorType == protocol.ProcessorExternal {
-		return "", fmt.Errorf("processorType=EXTERNAL is not supported by gojob worker (PowerJob loads it from a JAR container as containerID#className); implement/register it on the worker and use BUILT_IN")
+		return "", fmt.Errorf("processorType=EXTERNAL is not supported by gojob worker (the compat protocol loads it from a JAR container as containerID#className); implement/register it on the worker and use BUILT_IN")
 	}
 	p, ok := lookupProcessor(task.Processor)
 	if !ok {

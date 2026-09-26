@@ -56,7 +56,7 @@ func (m *Manager) Claims(tk string) (Claims, bool) {
 	if err != nil {
 		return Claims{}, false
 	}
-	if m.revoked.Has(c.Jti) {
+	if m.revoked.Has(c.Jti, PurposeConsole) {
 		return Claims{}, false
 	}
 	return c, true
@@ -112,7 +112,7 @@ func CheckPassword(hash, plain string) bool {
 // ---------- 项目（app）口令 ----------
 //
 // 项目口令只有 bcrypt 一种形态，库里不存在任何明文或"明文等价物"（md5 摘要之类）。
-// 这也意味着 PowerJob authApp 兼容层必须收到明文口令才能校验，见 api.pjAuthApp 的差异声明。
+// 这也意味着 authApp 兼容层必须收到明文口令才能校验，见 api.pjAuthApp 的差异声明。
 
 // IsPasswordHashed 判断存量值是否已是 bcrypt 形态，用于迁移幂等。
 func IsPasswordHashed(s string) bool {

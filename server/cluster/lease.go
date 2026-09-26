@@ -1,12 +1,12 @@
 // Package cluster 让多个 gojob-server 副本安全地跑同一套库。
 //
-// 归属模型对齐 PowerJob：**按项目（app）划分调度所有权**，同一时刻只有一个副本调度某个 app
-// 的全部任务（PowerJob 用 app_info.current_server 表达，见其 ServerElectionService 与
+// 归属模型与兼容协议一致：**按项目（app）划分调度所有权**，同一时刻只有一个副本调度某个 app
+// 的全部任务（兼容协议用 app_info.current_server 表达，见其 ServerElectionService 与
 // "select id from AppInfoDO where currentServer = :currentServer"）。
-// 两处刻意不照抄：
-//  1. PowerJob 靠 worker 心跳反向 PING 旧主判活（它有 server→worker RPC），我们是 pull 模型，
+// 有两处刻意的偏离：
+//  1. 兼容协议靠 worker 心跳反向 PING 旧主判活（它有 server→worker RPC），我们是 pull 模型，
 //     只能用**租约 TTL**判活，所以接管时延是显式可算的（LeaseTTL + 一跳）。
-//  2. PowerJob 明确没解决"网络分区后旧主仍在写"（其选举是先到先得、无 fencing token），
+//  2. 兼容协议明确没解决"网络分区后旧主仍在写"（其选举是先到先得、无 fencing token），
 //     这里用 epoch + 条件 UPDATE 把它堵死：旧主哪怕还活着，写库也会被拒。
 package cluster
 

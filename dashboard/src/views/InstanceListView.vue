@@ -16,7 +16,7 @@ const auth = useAuthStore()
 const instances = ref<JobInstance[]>([])
 const loading = ref(false)
 const lastUpdated = ref('')
-// 实例详情弹窗（PowerJob 的行内"详情"）
+// 实例详情弹窗（行内"详情"）
 const detailOpen = ref(false)
 const detailId = ref(0)
 

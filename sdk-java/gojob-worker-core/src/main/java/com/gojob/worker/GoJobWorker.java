@@ -1,6 +1,8 @@
 package com.gojob.worker;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.gojob.worker.dto.ChallengeReq;
+import com.gojob.worker.dto.ChallengeResp;
 import com.gojob.worker.dto.ClusterHint;
 import com.gojob.worker.dto.FetchTaskReq;
 import com.gojob.worker.dto.FetchTaskResp;
@@ -15,6 +17,7 @@ import com.gojob.worker.dto.TaskResultsResp;
 import com.gojob.worker.dto.Tokenized;
 import com.gojob.worker.dto.TaskDTO;
 import com.gojob.worker.internal.HttpTransport;
+import com.gojob.worker.internal.RegisterCipher;
 import com.gojob.worker.internal.LogReporter;
 import com.gojob.worker.internal.RuntimeMetrics;
 import com.gojob.worker.internal.ServerException;
@@ -31,6 +34,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Semaphore;
@@ -98,6 +102,11 @@ public final class GoJobWorker implements AutoCloseable {
 
     /** 并发额度 = 空闲执行线程数；fetch 的 max_task_num 即 availablePermits()。 */
     private final Semaphore slots;
+    /**
+     * 额度释放信号（容量 1，满了就合并）：fetch 循环在"额度已满"时等它，而不是死睡 1 秒。
+     * 与 Go SDK 的 {@code slotFree} 同语义。
+     */
+    private final LinkedBlockingQueue<Object> slotFree = new LinkedBlockingQueue<>(1);
     private final ExecutorService taskPool;
     private final ScheduledExecutorService heartbeatPool;
 
@@ -205,14 +214,15 @@ public final class GoJobWorker implements AutoCloseable {
                 config.getServerAddresses(), config.getAppId(), config.getAddress(), instanceId, VERSION,
                 config.getSdkType());
         try {
-            register();
+            registerAtStartup();
         } catch (IOException e) {
             started.set(false);
             throw new GoJobException("worker register failed, check app_id/password: " + e.getMessage(), e);
         }
         logReporter.start();
         // 首次心跳立即发一次，尽量赶在 fetch 之前，避免 "no alive worker" 瞬时错误
-        heartbeatPool.scheduleWithFixedDelay(this::heartbeatOnce, 0, config.getHeartBeatSeconds(), TimeUnit.SECONDS);
+        heartbeatPool.execute(this::heartbeatOnce);
+        scheduleHeartbeat();
         fetchThread = new Thread(this::fetchLoop, "gojob-worker-fetch");
         fetchThread.setDaemon(true);
         fetchThread.start();
@@ -304,18 +314,84 @@ public final class GoJobWorker implements AutoCloseable {
 
     // ---------- 数据面凭证 ----------
 
+    /** 启动期注册对"连不上"的止损时间（毫秒），与 Go SDK 的 registerGiveUp 同值。 */
+    private static final long REGISTER_GIVE_UP_MS = 120_000L;
+    private static final long[] REGISTER_BACKOFF_MS = {200L, 1_000L, 2_000L, 5_000L};
+
+    /**
+     * 启动期注册：连不上就退避重试，服务端明确拒绝则立即失败。与 Go SDK 的
+     * {@code registerAtStartup} 同语义（分类也一致：{@link ServerException} 是"答了但说不行"）。
+     *
+     * <p>必须有重试：注册是整条链路上唯一要过 BCrypt 校验项目口令的请求，一次几十毫秒 CPU。
+     * 整池 worker 同时冷启动会把服务端的 accept 队列打满——实测 200 节点同机启动、
+     * 队列上限 128 时，每轮稳定有 6~23 个节点在 /worker/register 上吃到 connection reset。
+     * 就此退出的节点会永久缺席，而其余节点跑得好好的，现场看起来"调度没问题"。
+     */
+    private void registerAtStartup() throws IOException {
+        long deadline = System.currentTimeMillis() + REGISTER_GIVE_UP_MS;
+        for (int attempt = 0; ; attempt++) {
+            try {
+                register();
+                if (attempt > 0) {
+                    log.info("worker 注册在第 {} 次尝试后成功", attempt + 1);
+                }
+                return;
+            } catch (ServerException e) {
+                throw e; // 口令不对/要求加密注册/服务端没配 key：重试不会让它变对
+            } catch (IOException e) {
+                long left = deadline - System.currentTimeMillis();
+                if (left <= 0) {
+                    throw new IOException("注册持续连不上（重试 " + (attempt + 1) + " 次，超过 "
+                            + REGISTER_GIVE_UP_MS + "ms 止损）", e);
+                }
+                // 抖动是必需的：整池节点同时启动，不错峰就会在每个阶梯上再撞一次队列
+                long wait = REGISTER_BACKOFF_MS[Math.min(attempt, REGISTER_BACKOFF_MS.length - 1)];
+                wait += (long) (Math.random() * (wait / 2));
+                if (wait > left) {
+                    wait = left;
+                }
+                log.warn("worker 注册连不上({})，{}ms 后重试", e.toString(), wait);
+                try {
+                    Thread.sleep(wait);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("注册重试被中断", ie);
+                }
+            }
+        }
+    }
+
     /**
      * 用项目口令换 token：整条数据面只有这一刻带口令。
      * 口令被改或项目被删时服务端会吊销该项目的票，节点只能凭新口令重新注册。
+     *
+     * <p>配了 {@code aesKey} 时口令不再明文上线：先领一张一次性 challenge，再把它连同
+     * 口令一起封进 AES-256-GCM 密文。配了 key 就<b>一定</b>加密——服务端没启用时注册直接
+     * 失败并指出是它没配，绝不静默退回明文（那等于给中间人一个"抹掉加密"的开关）。
      */
     private void register() throws IOException {
         RegisterReq req = new RegisterReq();
         req.instanceId = instanceId;
         req.appId = config.getAppId();
-        req.password = config.getPassword();
         req.address = config.getAddress();
         req.version = VERSION;
         req.sdkType = config.getSdkType();
+        String aesKey = config.getAesKey();
+        if (aesKey == null || aesKey.isBlank()) {
+            req.authScheme = RegisterCipher.SCHEME_PLAIN;
+            req.password = config.getPassword();
+        } else {
+            // 配置写错（长度/非 hex）在这一刻就报，而不是解出一堆垃圾再报"口令错误"
+            byte[] key = RegisterCipher.parseKey(aesKey);
+            ChallengeResp ch = sealChallenge(req.appId);
+            RegisterCipher.Sealed sealed = RegisterCipher.seal(key, req.appId, instanceId,
+                    ch.challenge, config.getPassword(), transport.mapper());
+            req.authScheme = RegisterCipher.SCHEME_AES_GCM;
+            req.kid = sealed.kid();
+            req.iv = sealed.iv();
+            req.ciphertext = sealed.ciphertext();
+            req.challenge = sealed.challenge();
+        }
         JsonNode data = transport.request("/worker/register", req, null);
         RegisterResp resp = transport.mapper().convertValue(data, RegisterResp.class);
         if (resp == null || resp.token == null || resp.token.isEmpty()) {
@@ -325,7 +401,18 @@ public final class GoJobWorker implements AutoCloseable {
         this.tokenTtlMillis = ttl;
         this.tokenExpireAtMillis = System.currentTimeMillis() + ttl;
         this.token = resp.token;
-        log.info("worker token issued: instanceId={} ttl={}s", instanceId, resp.ttlSeconds);
+        log.info("worker token issued: instanceId={} ttl={}s encrypted={}",
+                instanceId, resp.ttlSeconds, RegisterCipher.SCHEME_AES_GCM.equals(req.authScheme));
+    }
+
+    /** 握手第一步：领一张一次性 challenge。服务端未启用加密时这一步就报错，线索在它自己的文案里。 */
+    private ChallengeResp sealChallenge(String appId) throws IOException {
+        JsonNode node = transport.request("/worker/challenge", new ChallengeReq(instanceId, appId), null);
+        ChallengeResp resp = transport.mapper().convertValue(node, ChallengeResp.class);
+        if (resp == null || resp.challenge == null || resp.challenge.isEmpty()) {
+            throw new IOException("服务端返回了空 challenge（多半是它没启用注册加密，而本节点配了 aesKey）");
+        }
+        return resp;
     }
 
     /**
@@ -387,6 +474,28 @@ public final class GoJobWorker implements AutoCloseable {
 
     // ---------- 心跳 ----------
 
+    /**
+     * 心跳自排期：每跳之后按 {@code ±25%} 的抖动重新入队，而不是固定周期。
+     * 与 Go SDK 的 {@code heartbeatLoop} 同语义。
+     *
+     * <p>必须有抖动：心跳是 worker 侧唯一高频写库的请求（每节点每跳 upsert 一行
+     * worker_nodes）。整池节点同时冷启动后相位一致，每 {@code heartBeatSeconds} 秒
+     * <b>齐射</b>一次；实测 200 节点在 sqlite 上把单条心跳写成到 237~338ms（服务端
+     * SLOW SQL），而任务认领是同一条写通道上的事务，被排到 1 秒开外。相位打散之后
+     * 齐射摊成匀速，同一场景的广播轮次从整轮 ~1s 回到 max 140ms 量级。
+     */
+    private void scheduleHeartbeat() {
+        long intervalMs = config.getHeartBeatSeconds() * 1000L;
+        long wait = intervalMs;
+        if (intervalMs >= 2000) { // 间隔太短就别抖
+            wait += (long) (Math.random() * (intervalMs / 2)) - intervalMs / 4;
+        }
+        heartbeatPool.schedule(() -> {
+            heartbeatOnce();
+            scheduleHeartbeat();
+        }, wait, TimeUnit.MILLISECONDS);
+    }
+
     private void heartbeatOnce() {
         renewIfNeeded();
         HeartbeatReq req = new HeartbeatReq();
@@ -412,7 +521,7 @@ public final class GoJobWorker implements AutoCloseable {
                 }
                 cancelTasks(ids);
             }
-            // 集群路由提示同样只走心跳这一条通道（零额外 QPS；对比 PowerJob 每 10s 单独问一次 /server/acquire）
+            // 集群路由提示同样只走心跳这一条通道（零额外 QPS；兼容协议是每 10s 单独问一次 /server/acquire）
             if (data != null && data.path("cluster").isObject()) {
                 applyHint(transport.mapper().convertValue(data.get("cluster"), ClusterHint.class));
             }
@@ -505,7 +614,7 @@ public final class GoJobWorker implements AutoCloseable {
         return used / (1024.0 * 1024.0);
     }
 
-    /** JVM 堆上限（-Xmx），单位 MB，对应 PowerJob 的 jvmMaxMemory。 */
+    /** JVM 堆上限（-Xmx），单位 MB，对应兼容协议的 jvmMaxMemory。 */
     private static double readMemoryMaxMb() {
         return Runtime.getRuntime().maxMemory() / (1024.0 * 1024.0);
     }
@@ -519,8 +628,13 @@ public final class GoJobWorker implements AutoCloseable {
                 continue;
             }
             int free = slots.availablePermits();
-            if (free <= 0) { // 并发额度已满
-                sleepQuietly(1000);
+            if (free <= 0) { // 并发额度已满：等"有额度了"，1s 只是兜底
+                try {
+                    slotFree.poll(1, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
                 continue;
             }
             FetchTaskReq req = new FetchTaskReq();
@@ -545,6 +659,7 @@ public final class GoJobWorker implements AutoCloseable {
                         taskPool.execute(() -> runTask(task));
                     } catch (RejectedExecutionException e) {
                         slots.release();
+                        pokeSlotFree();
                         log.warn("worker draining, drop fetched task {} (server will reassign)", task.taskId);
                         return;
                     }
@@ -673,10 +788,10 @@ public final class GoJobWorker implements AutoCloseable {
                 // 停止指令在开跑前就到：不执行处理器，直接按 STOPPED 收尾
                 result = new ProcessResult(false, "cancelled before start");
             } else if ("EXTERNAL".equalsIgnoreCase(task.processorType)) {
-                // PowerJob 里 EXTERNAL 表示去 JAR 动态容器按 容器ID#类名 加载，本 SDK 没有对应
-                // 实现；说清楚比报"找不到处理器"好排查（对标 PowerJob 的 fetch Processor failed）
+                // 兼容协议里 EXTERNAL 表示去 JAR 动态容器按 容器ID#类名 加载，本 SDK 没有对应
+                // 实现；说清楚比报"找不到处理器"好排查（沿用兼容协议的 fetch Processor failed 文案）
                 result = new ProcessResult(false, "processorType=EXTERNAL is not supported by gojob worker"
-                        + " (PowerJob loads it from a JAR container as containerID#className);"
+                        + " (the compat protocol loads it from a JAR container as containerID#className);"
                         + " implement it in the worker and use BUILT_IN");
             } else if (processor == null) {
                 result = new ProcessResult(false, "processor '" + task.processor
@@ -688,7 +803,7 @@ public final class GoJobWorker implements AutoCloseable {
                         task.taskKey, task.taskName, task.executeType, task.subTaskContent, this);
                 ProcessResult r;
                 if (context.isLastTask()) {
-                    // reduce 任务（PowerJob 的 OMS_LAST_TASK）：本次执行的成败与结果由它说了算，
+                    // reduce 任务（兼容协议的 OMS_LAST_TASK）：本次执行的成败与结果由它说了算，
                     // 所以"部分子任务失败但可接受"这种容错只能写在 reduce 里。
                     if (!(processor instanceof MapReduceProcessor)) {
                         r = new ProcessResult(false, "processor '" + task.processor
@@ -723,6 +838,7 @@ public final class GoJobWorker implements AutoCloseable {
             report(task, result, stopped);
         } finally {
             slots.release(); // 回报完成后再归还额度，保证 drain 语义
+            pokeSlotFree();
         }
     }
 
@@ -787,6 +903,11 @@ public final class GoJobWorker implements AutoCloseable {
         }
         // 回报彻底失败：任务停在 RUNNING，Server 的超时回收（ReassignLostTasks）会重新入队，无需本地重试
         log.error("report task {} still failed after 3 attempts; rely on server reassign", task.taskId);
+    }
+
+    /** 归还额度后喊一声；队列容量 1，满了就合并成一次唤醒（唤醒是"该去看一眼"，不是计数）。 */
+    private void pokeSlotFree() {
+        slotFree.offer(new Object());
     }
 
     private static void sleepQuietly(long millis) {

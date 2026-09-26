@@ -39,7 +39,7 @@ func (w *Worker) fillRuntime(info *protocol.WorkerInfo) {
 func round1(f float64) float64 { return math.Round(f*10) / 10 }
 
 // memoryTotalMB 本进程可用内存上限（MB），0=未知。
-// 优先读容器限额，与 PowerJob 用 JVM 上限打分的口径对齐：容器里跑的 worker 应以 cgroup 限额为准。
+// 优先读容器限额，与兼容协议用 JVM 上限打分的口径一致：容器里跑的 worker 应以 cgroup 限额为准。
 func memoryTotalMB() float64 {
 	if b, err := os.ReadFile("/sys/fs/cgroup/memory.max"); err == nil { // cgroup v2
 		if s := strings.TrimSpace(string(b)); s != "" && s != "max" {
@@ -65,7 +65,7 @@ func memoryTotalMB() float64 {
 	return 0 // darwin/windows 本地开发取不到：健康分退化为按已用内存排序
 }
 
-// loadAverage1m 1 分钟平均负载，单位=繁忙核数，与 PowerJob SystemMetrics.cpuLoad 同量纲
+// loadAverage1m 1 分钟平均负载，单位=繁忙核数，与兼容协议 SystemMetrics.cpuLoad 同量纲
 // （其打分公式为 cpuProcessors - cpuLoad）。取不到返回 0（视为空闲）。
 func loadAverage1m() float64 {
 	b, err := os.ReadFile("/proc/loadavg")

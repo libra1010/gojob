@@ -10,7 +10,7 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
-    # gojob 管理面 + PowerJob 兼容 OpenAPI → 反代到 server
+    # gojob 管理面 + 兼容协议 OpenAPI → 反代到 server
     location /openapi {
         proxy_pass ${GOJOB_UPSTREAM};
         proxy_set_header Host $host;

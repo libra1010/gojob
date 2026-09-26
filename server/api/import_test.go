@@ -73,7 +73,7 @@ func TestNormalizeProcessorType(t *testing.T) {
 
 // 导入的 SHELL 任务落地后必须变成"能跑的那份配置"，而不是静默存成跑不了的类名。
 func TestConvertLegacyShellJob(t *testing.T) {
-	job, err := (&jobConverter{appId: "app1"}).convert(&protocol.PowerJobJob{
+	job, err := (&jobConverter{appId: "app1"}).convert(&protocol.JobDTO{
 		JobName:            sp("legacy-shell"),
 		TimeExpressionType: sp("API"),
 		ProcessorType:      sp("SHELL"),

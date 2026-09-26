@@ -1,5 +1,5 @@
 // authApp 的口令校验：gojob 刻意只接受明文 password（库里没有 md5 等价物），
-// PowerJob 官方 SDK 的 encryptedPassword(md5) 形态必须被明确拒绝。
+// 兼容协议官方 SDK 的 encryptedPassword(md5) 形态必须被明确拒绝。
 package api
 
 import (
@@ -75,7 +75,7 @@ func TestPjAuthAppRejects(t *testing.T) {
 	}{
 		{"md5-only（官方 SDK encryptType=1）",
 			`{"appName":"demo_app","encryptedPassword":"0d4e1b6f0a6a8e5b9f9e0e2f9a3e2e6f","encryptType":1}`,
-			"requires plaintext"},
+			"rejected by design"},
 		{"把 md5 当明文提交",
 			`{"appName":"demo_app","password":"0d4e1b6f0a6a8e5b9f9e0e2f9a3e2e6f"}`,
 			"password mismatch"},

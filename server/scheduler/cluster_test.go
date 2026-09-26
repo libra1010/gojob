@@ -175,7 +175,7 @@ func TestTriggerConsumedOnlyOnce(t *testing.T) {
 }
 
 // 僵尸主：租约已被接管，哪怕它手里的计划时间仍然对得上（CAS 本可以通过），
-// 事务内的 fencing 也必须先把它挡下来。这正是 PowerJob 明确没有防护的场景。
+// 事务内的 fencing 也必须先把它挡下来。这正是兼容协议明确没有防护的场景。
 func TestZombieOwnerCannotWrite(t *testing.T) {
 	f := newClusterFixture(t)
 	now := store.Now()

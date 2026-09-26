@@ -1,7 +1,7 @@
 package com.gojob.worker;
 
 /**
- * 一个子任务的执行结果（对标 PowerJob 的 tech.powerjob.worker.core.processor.TaskResult）。
+ * 一个子任务的执行结果（对标兼容协议的 tech.powerjob.worker.core.processor.TaskResult）。
  * reduce 收到的就是这个列表。
  */
 public final class TaskResult {
@@ -18,7 +18,7 @@ public final class TaskResult {
         this.result = result;
     }
 
-    /** 层次任务号："0.1"、"0.2.3"…… 与 PowerJob 的 taskId 形态一致。 */
+    /** 层次任务号："0.1"、"0.2.3"…… 与兼容协议的 taskId 形态一致。 */
     public String getTaskId() {
         return taskId;
     }

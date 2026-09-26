@@ -1,5 +1,5 @@
-// PowerJob OpenAPI 兼容层：路径、鉴权、DTO、响应信封对齐 PowerJob 4.x 客户端
-// （tech.powerjob.client.PowerJobClient 直接可用）。
+// OpenAPI 兼容层：路径、鉴权、DTO、响应信封对齐兼容协议（PowerJob）4.x 的客户端
+// （其 tech.powerjob.client.PowerJobClient 可直接打到本层）。
 //
 //	鉴权：POST /openApi/authApp {appName, password: 明文}
 //	      → data {appId, token}；后续请求携带 Header:
@@ -7,7 +7,8 @@
 //	      响应头 X-POWERJOB-AUTH-PASSED: true|false（客户端以此判断是否需要刷新鉴权）。
 //	响应：ResultDTO 形态 {"success":bool,"data":...,"message":...}。
 //
-// 差异（README 中同步声明）：authApp 只接受明文 password（库里无 md5 等价物），
+// 差异（README 中同步声明）：authApp 接受明文 password，或 gojob 自己的加密握手
+// （/openApi/challenge + authScheme=aes-gcm，见 registercipher_api.go）；
 // encryptType=1 的 encryptedPassword 请求被明确拒绝；executeType 仅 STANDALONE 真实生效；
 // 工作流接口返回不支持；runJob 的 delayMS>0 时异步触发、返回 data=0；
 // 额外支持 gojob 扩展字段 skipWhenRunning。
@@ -60,6 +61,14 @@ func pjFail(c *gin.Context, msg string) {
 	pjWrite(c, true, pjResult{Success: false, Message: msg})
 }
 
+// pjChallengeData authApp 加密握手的载荷（放进兼容信封的 data 里）。
+// 官方客户端不认识这些字段，只会读 message，所以多出来的 data 对它无害。
+type pjChallengeData struct {
+	Challenge string   `json:"challenge,omitempty"`
+	ExpiresIn int      `json:"expiresIn,omitempty"`
+	Schemes   []string `json:"schemes,omitempty"`
+}
+
 // ---------- App 级 token ----------
 //
 // 令牌本身在 auth.OpenAPITokens 里（无状态签名 + 项目吊销基线），这里只保留
@@ -67,9 +76,10 @@ func pjFail(c *gin.Context, msg string) {
 
 // ---------- 路由注册 ----------
 
-func (s *Server) registerPowerJobOpenAPI(r *gin.Engine) {
+func (s *Server) registerOpenAPICompat(r *gin.Engine) {
 	g := r.Group("/openApi")
 	g.POST("/authApp", s.pjAuthApp)
+	g.POST("/challenge", s.pjChallenge) // 加密握手第一步；未启用加密时只回 schemes
 	pj := g.Group("", s.pjRequire)
 	{
 		pj.POST("/saveJob", s.pjSaveJob)
@@ -109,6 +119,13 @@ func (s *Server) pjAuthApp(c *gin.Context) {
 		Password          string `json:"password"`
 		EncryptedPassword string `json:"encryptedPassword"`
 		EncryptType       int    `json:"encryptType"`
+		// gojob 扩展：口令可以走"一次性 challenge + AES-256-GCM"送上来的同一套握手
+		// （与 /worker/register 完全同款，principal 为空）。见 README「注册口令加密」。
+		AuthScheme string `json:"authScheme"`
+		Kid        string `json:"kid"`
+		Iv         string `json:"iv"`
+		Ciphertext string `json:"ciphertext"`
+		Challenge  string `json:"challenge"`
 	}](c)
 	if err != nil || req.AppName == "" {
 		pjFail(c, "bad authApp request")
@@ -120,14 +137,31 @@ func (s *Server) pjAuthApp(c *gin.Context) {
 		return
 	}
 	// 声明的偏离：gojob 库里只有 bcrypt 摘要，没有任何明文口令等价物，所以 authApp 必须提交
-	// 明文 password。官方 PowerJob 客户端在 encryptType=1 下只提交 encryptedPassword=md5(明文)，
-	// 这类请求无法校验（要支持就得入库一份"知道即可冒用"的摘要），一律明确拒绝。
-	if req.Password == "" {
-		pjFail(c, "AUTH_FAILED: gojob requires plaintext \"password\" in authApp; "+
-			"encryptedPassword(md5) is rejected by design, see README \"与 PowerJob 的差异\"")
+	// 明文 password，或者走 gojob 自己的加密握手。兼容协议的官方客户端在 encryptType=1 下只提交
+	// encryptedPassword=md5(明文)，这类请求无法校验（要支持就得入库一份"知道即可冒用"的摘要），
+	// 一律明确拒绝。
+	if req.EncryptedPassword != "" {
+		pjFail(c, "AUTH_FAILED: gojob accepts plaintext \"password\" or its own encrypted "+
+			"handshake (authScheme=aes-gcm); encryptedPassword(md5) is rejected by design, "+
+			"see README \"兼容性说明\"")
 		return
 	}
-	if !auth.CheckPassword(app.Password, req.Password) {
+	out := s.clearRegister(req.AppName, "", auth.Clear{
+		Scheme: req.AuthScheme, Kid: req.Kid, Iv: req.Iv,
+		Ciphertext: req.Ciphertext, Challenge: req.Challenge, Password: req.Password,
+	})
+	if out.Err != nil || !out.OK {
+		// 兼容信封里没有第二个码位，所以把"改用加密"要的东西放进 data：
+		// 支持握手的调用方据此一次重试，官方客户端只看 message。
+		data := pjChallengeData{Challenge: out.Challenge, Schemes: s.registerSchemes()}
+		if data.Challenge != "" {
+			data.ExpiresIn = int(auth.ChallengeTTL.Seconds())
+		}
+		pjWrite(c, true, pjResult{Success: false, Data: data,
+			Message: "AUTH_FAILED: " + out.Err.Error()})
+		return
+	}
+	if !auth.CheckPassword(app.Password, out.Password) {
 		pjFail(c, "AUTH_FAILED: password mismatch")
 		return
 	}
@@ -186,10 +220,10 @@ type pjSaveJobReq struct {
 	TaskRetryNum           *int    `json:"taskRetryNum"`
 	DesignatedWorkers      *string `json:"designatedWorkers"`
 	MaxWorkerCount         *int    `json:"maxWorkerCount"`
-	DispatchStrategy       any     `json:"dispatchStrategy"` // 枚举名或整数值，PowerJob 客户端两种形态都发得出
+	DispatchStrategy       any     `json:"dispatchStrategy"` // 枚举名或整数值，兼容协议客户端两种形态都发得出
 	DispatchStrategyConfig *string `json:"dispatchStrategyConfig"`
 	Enable                 *bool   `json:"enable"`
-	// gojob 扩展字段（PowerJob 客户端会忽略未知字段，向后兼容）
+	// gojob 扩展字段（兼容协议客户端会忽略未知字段，向后兼容）
 	SkipWhenRunning *bool `json:"skipWhenRunning"`
 }
 
@@ -218,7 +252,7 @@ func (s *Server) pjApplyJob(req *pjSaveJobReq, job *store.JobInfo) error {
 	job.ExecuteType = execType
 	job.DesignatedWorkers = derefStr(req.DesignatedWorkers, "")
 	job.MaxWorkerCount = deref(req.MaxWorkerCount, 0)
-	disp, err := pjStrategy(req.DispatchStrategy)
+	disp, err := openAPIStrategy(req.DispatchStrategy)
 	if err != nil {
 		return err
 	}
@@ -287,9 +321,9 @@ func derefStr(p *string, def string) string {
 	return def
 }
 
-// pjStrategy 归一化 PowerJob 客户端的 dispatchStrategy：Jackson 默认发枚举名，
-// 控制台/导出 JSON 发整数值。缺省回落 HEALTH_FIRST（同 PowerJob DispatchStrategy.of(null)）。
-func pjStrategy(v any) (int, error) {
+// openAPIStrategy 归一化兼容协议客户端的 dispatchStrategy：Jackson 默认发枚举名，
+// 控制台/导出 JSON 发整数值。缺省回落 HEALTH_FIRST（同兼容协议 DispatchStrategy.of(null)）。
+func openAPIStrategy(v any) (int, error) {
 	switch t := v.(type) {
 	case nil:
 		return protocol.DispatchHealthFirst, nil
@@ -351,7 +385,7 @@ func (s *Server) pjToDTO(job *store.JobInfo) pjSaveJobReq {
 func strPtr(s string) *string { return &s }
 
 // ---------- 请求字段提取 ----------
-// PowerJob 各版本客户端有的接口发 form 参数、有的发 JSON body，这里统一提取；
+// 兼容协议各版本客户端有的接口发 form 参数、有的发 JSON body，这里统一提取；
 // 结果缓存在 gin context 上（body 只能读一次）。
 func pjFields(c *gin.Context) map[string]string {
 	if v, ok := c.Get("pjFields"); ok {
@@ -556,7 +590,7 @@ func (s *Server) pjRun(c *gin.Context, job *store.JobInfo, instanceParams string
 		go func() {
 			time.Sleep(d)
 			if _, err := s.sched.TriggerRun(job, instanceParams); err != nil {
-				// skip_when_running 等策略导致跳过：静默，与 PowerJob 行为差异见 README
+				// skip_when_running 等策略导致跳过：静默，与兼容协议的行为差异见 README
 				_ = err
 			}
 		}()

@@ -11,7 +11,7 @@ import jakarta.inject.Inject;
  * Quarkus/CDI 风格处理器示例：就是一个普通 bean，可注入任意业务依赖。
  *
  * <p>Server 端 Job 的 processor 字段填本类类全名
- * {@code com.gojob.example.quarkus.HelloProcessor}（与 PowerJob 导入任务的
+ * {@code com.gojob.example.quarkus.HelloProcessor}（与兼容协议导入任务的
  * processorInfo=类全名 语义一致）。
  */
 @ApplicationScoped

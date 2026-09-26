@@ -170,7 +170,7 @@ func TestMapChildrenKeepInstanceAliveAfterRootFinishes(t *testing.T) {
 		if c.Status != protocol.InstanceSucceed {
 			t.Fatalf("全部子任务收尾后实例 = %s, want SUCCEED", c.Status)
 		}
-		// 非 MAP_REDUCE 的实例结果取根任务的返回值（PowerJob 同语义）
+		// 非 MAP_REDUCE 的实例结果取根任务的返回值（兼容协议同语义）
 		if c.Result != "已切分 3 片" {
 			t.Fatalf("实例结果 = %q, want 根任务的结果", c.Result)
 		}

@@ -21,22 +21,22 @@ import (
 	"gojob/worker"
 )
 
-// ShellAliasName 是官方 Shell 处理器的 gojob 短名别名；主名用 PowerJob 的类全名
+// ShellAliasName 是官方 Shell 处理器的 gojob 短名别名；主名用兼容协议的类全名
 // （protocol.OfficialShellProcessor），这样同一份任务配置在两边通用。
 const ShellAliasName = "shell"
 
-// scriptDirName 与 PowerJob AbstractScriptProcessor 的工作子目录同名，便于两边对照。
+// scriptDirName 与兼容协议 AbstractScriptProcessor 的工作子目录同名，便于两边对照。
 const scriptDirName = "official_script_processor"
 
-// downloadPrefixes 照搬 PowerJob 的 DOWNLOAD_PROTOCOL：参数以这些前缀开头即视为下载链接。
+// downloadPrefixes 沿用兼容协议的 DOWNLOAD_PROTOCOL：参数以这些前缀开头即视为下载链接。
 var downloadPrefixes = []string{"http://", "https://", "ftp://"}
 
-// Script 执行 Shell 脚本，行为对齐 PowerJob 的
+// Script 执行 Shell 脚本，行为对齐兼容协议的
 // tech.powerjob.official.processors.impl.script.ShellProcessor：脚本内容取执行参数
 // （instanceParams 非空优先，否则 jobParams），落成脚本文件、chmod 755、用 /bin/sh 执行，
 // 标准输出与错误输出逐行同步到任务日志通道。
 //
-// 在 PowerJob 之上多了一道必须说清的闸：默认只执行 ScriptDir 里预置好的脚本，想让"任务参数
+// 在兼容协议之上多了一道必须说清的闸：默认只执行 ScriptDir 里预置好的脚本，想让"任务参数
 // 里带来的脚本文本/下载链接"也能跑，必须显式 AllowInline。理由是权限边界——建任务只要项目
 // 口令，若参数即脚本，拿到口令就等于拿到 agent 所在主机的命令执行权。
 type Script struct {
@@ -45,14 +45,14 @@ type Script struct {
 	// AllowInline 允许执行任务参数里的脚本文本/下载链接。
 	AllowInline bool
 	// Workspace 内联脚本的工作目录，默认 {user.home}/gojob/agent
-	// （PowerJob 用 {user.home}/powerjob/worker）。
+	// （兼容协议用 {user.home}/powerjob/worker）。
 	Workspace string
-	// Timeout 单次执行上限，0 = 不限制（对齐 PowerJob instanceTimeLimit=0 的语义）。
+	// Timeout 单次执行上限，0 = 不限制（与兼容协议 instanceTimeLimit=0 的语义一致）。
 	Timeout time.Duration
 }
 
 func (s *Script) Process(ctx *worker.TaskContext) error {
-	// PowerJob 的 CommonUtils.parseParams：实例参数优先，其次任务参数
+	// 兼容协议的 CommonUtils.parseParams：实例参数优先，其次任务参数
 	params := strings.TrimSpace(ctx.InstanceParams)
 	if params == "" {
 		params = strings.TrimSpace(ctx.JobParams)
@@ -61,7 +61,7 @@ func (s *Script) Process(ctx *worker.TaskContext) error {
 		return errors.New("脚本内容为空：请在任务参数（或实例参数）里填脚本库中的脚本名，或脚本正文")
 	}
 	if runtime.GOOS == "windows" {
-		// PowerJob 同样的限制：Windows 上 shell 脚本无法执行（要用 CMD/PowerShell 处理器）
+		// 兼容协议同样的限制：Windows 上 shell 脚本无法执行（要用 CMD/PowerShell 处理器）
 		return fmt.Errorf("当前 OS 为 %s，shell 脚本无法执行", runtime.GOOS)
 	}
 	scriptPath, args, err := s.resolve(params, ctx.InstanceID)
@@ -84,7 +84,7 @@ func (s *Script) resolve(params string, instanceID uint64) (string, []string, er
 		return "", nil, fmt.Errorf("脚本库中找不到 %q（脚本库=%s）；要执行任务参数里直接给的脚本文本，需显式设 GOJOB_AGENT_ALLOW_INLINE_SCRIPTS=true",
 			name, orNA(s.ScriptDir))
 	}
-	// 内联模式没有"参数"这一说：整段参数都是脚本内容，与 PowerJob 一致
+	// 内联模式没有"参数"这一说：整段参数都是脚本内容，与兼容协议一致
 	p, err := s.materialize(strings.TrimSpace(params), instanceID)
 	return p, nil, err
 }
@@ -110,10 +110,10 @@ func (s *Script) fromLibrary(name string) (string, bool) {
 	return p, true
 }
 
-// materialize 把脚本文本写成可执行文件，路径与命名沿用 PowerJob
+// materialize 把脚本文本写成可执行文件，路径与命名沿用兼容协议
 // （{workspace}/official_script_processor/shell_{instanceId}.sh）。
 //
-// 与 PowerJob 有一处有意差异：它遇到同名文件直接复用（prepareScriptFile 里 script.exists()
+// 与兼容协议有一处有意差异：它遇到同名文件直接复用（prepareScriptFile 里 script.exists()
 // 即返回），改过的脚本会静默按旧内容再跑一遍；这里每次覆盖写入。
 func (s *Script) materialize(script string, instanceID uint64) (string, error) {
 	dir := filepath.Join(s.workspace(), scriptDirName)
@@ -136,7 +136,7 @@ func (s *Script) materialize(script string, instanceID uint64) (string, error) {
 	return path, nil
 }
 
-// download 对应 PowerJob 的 FileUtils.copyURLToFile(url, file, 5000, 300000)。
+// download 对应兼容协议的 FileUtils.copyURLToFile(url, file, 5000, 300000)。
 // ftp 在 Java 里由 URL 直接支持，Go 的 http.Client 做不到，明确拒绝而不是悄悄跑错。
 func download(url, path string) error {
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
@@ -171,7 +171,7 @@ func download(url, path string) error {
 	return nil
 }
 
-// run 执行脚本并把输出逐行同步到任务日志。解释器固定 /bin/sh（PowerJob 的 SH_SHELL），
+// run 执行脚本并把输出逐行同步到任务日志。解释器固定 /bin/sh（兼容协议的 SH_SHELL），
 // 脚本自己写 shebang 不影响这一点——被 exec 的是文件路径，走的仍是 /bin/sh。
 func (s *Script) run(ctx *worker.TaskContext, scriptPath string, args []string) error {
 	runCtx, cancel := context.WithCancel(ctx)

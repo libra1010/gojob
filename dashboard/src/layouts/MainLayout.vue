@@ -101,7 +101,10 @@ async function onLogout() {
     <el-header class="header">
       <div class="brand" @click="router.push('/')">
         <span class="logo">G</span>
-        <span class="title">gojob 控制台</span>
+        <span class="brand-text">
+          <span class="title">gojob</span>
+          <span class="subtitle">轻量级分布式任务调度平台</span>
+        </span>
       </div>
       <el-menu
         class="nav"
@@ -191,6 +194,17 @@ async function onLogout() {
   font-size: 17px;
   font-weight: 600;
   color: #303133;
+  white-space: nowrap;
+}
+/* 主标题只写产品名，定位放副标题：一屏之内先认出"这是 gojob"，再看它是干什么的 */
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+.subtitle {
+  font-size: 11px;
+  color: #909399;
   white-space: nowrap;
 }
 .nav {

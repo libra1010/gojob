@@ -118,6 +118,12 @@ func (d *Dispatcher) Fetch(ctx context.Context, req *protocol.FetchTaskReq) ([]p
 	}
 	deadline := time.Now().Add(time.Duration(req.WaitSeconds) * time.Second)
 	for {
+		// 先取本次要等的唤醒 channel，再去认领。顺序反了就有一个丢唤醒的窗口：
+		// claim 返回空 → 这中间有人 Notify（close 掉当时的旧 channel 并换新）→ watchCh
+		// 拿到新 channel → 等下去没人再 close 它。兜底只有 5s 复查（单副本配了 cluster
+		// 密钥时还有 1s 一跳的跨副本信号），压测里就出现过整轮任务统一迟到 1.27s。
+		// channel 一旦 close 就永远可读，所以提前取即可保证不漏、也不会多等。
+		wake := d.watchCh()
 		tasks, err := d.claim(req, maxNum)
 		if err != nil {
 			return nil, nil, err
@@ -136,7 +142,6 @@ func (d *Dispatcher) Fetch(ctx context.Context, req *protocol.FetchTaskReq) ([]p
 		if wait > 5*time.Second {
 			wait = 5 * time.Second // 周期性复查，唤醒信号丢了也不至于饿死
 		}
-		wake := d.watchCh()
 		select {
 		case <-ctx.Done():
 			return nil, nil, ctx.Err()
@@ -447,7 +452,7 @@ func (d *Dispatcher) ReassignLostTasks(olderThan time.Duration) error {
 		return err
 	}
 	// 失联且未请求停止的任务分两类处理。广播子任务是"每台一份"这件事本身，换机重跑等于
-	// 让同一份工作在一个从没执行过它的节点上再执行一遍（PowerJob issue #1003 明确禁止），
+	// 让同一份工作在一个从没执行过它的节点上再执行一遍（兼容协议明确禁止这样做），
 	// 所以它不重派，直接判失败；其余任务照旧退回队列换机重试。
 	var lost []store.InstanceTask
 	if err := d.st.DB.Where("status = ? AND dispatch_time < ? AND stop_request_time IS NULL",

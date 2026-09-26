@@ -1,11 +1,11 @@
-// 实例详情与子任务查询：对齐 PowerJob 的 POST /instance/detailPlus。
+// 实例详情与子任务查询：对应兼容协议的 POST /instance/detailPlus。
 //
-// PowerJob 这一步是 server 反向 ask TaskTracker 所在 worker、由它查本机 task_info 表；
+// 兼容协议这一步是 server 反向 ask TaskTracker 所在 worker、由它查本机 task_info 表；
 // gojob 的任务树就在库里的 instance_tasks，所以同一份数据不必现场问执行节点，
 // 实例结束、worker 下线之后依然可查（这是把子任务落库换来的能力）。
 //
 // UI 上那个 "select * from task_info where ___ limit 10" 输入框照搬，但后端**不拼 SQL**：
-// 把用户文本原样交给数据库等于给控制台开注入口（PowerJob 只有关键字黑名单，而且它是在
+// 把用户文本原样交给数据库等于给控制台开注入口（兼容协议只有关键字黑名单，而且它是在
 // 自己 worker 的本地库上执行，越权面比在我们的共享库上小得多）。
 // 这里换成只认白名单语法片的解析器，认不出来就明确说支持什么。
 package api
@@ -24,10 +24,10 @@ import (
 	"gojob/server/store"
 )
 
-// taskInfoLimit 与 PowerJob 那句写死的后缀 limit 10 同值。
+// taskInfoLimit 与兼容协议那句写死的后缀 limit 10 同值。
 const taskInfoLimit = 10
 
-// TaskInfoRow 子任务表的一行，列按 PowerJob 控制台 task_info 的展示口径给。
+// TaskInfoRow 子任务表的一行，列按兼容协议控制台 task_info 的展示口径给。
 type TaskInfoRow struct {
 	TaskID        string    `json:"task_id"`        // 层次 ID："0" / "0.3" / reduce 是 "9999"
 	TaskName      string    `json:"task_name"`      // map() 的第二参；内部任务是 OMS_* 保留名
@@ -41,7 +41,7 @@ type TaskInfoRow struct {
 	Result        string    `json:"result"`
 }
 
-// TaskStats 任务统计，PowerJob 详情弹窗里那行 "Task 统计:" 的内容。
+// TaskStats 任务统计，详情弹窗里那行 "Task 统计:" 的内容（沿用兼容协议口径）。
 type TaskStats struct {
 	Total     int `json:"total"`
 	Waiting   int `json:"waiting"`
@@ -83,11 +83,11 @@ var (
 
 const queryHelp = "支持的写法：status = N / status in (N, N) / task_name = 'X' / task_name in ('X', 'Y') / " +
 	"parent_task_id = N，条件之间用 and 连接；可选 order by id|created_time|last_modified_time|status|task_name [asc|desc]。" +
-	"status 的数字按 PowerJob 的 TaskStatus 序号解释（5=失败、6=成功），也可以直接写状态名。"
+	"status 的数字按任务状态序号解释（5=失败、6=成功），也可以直接写状态名。"
 
 // orderColumn 把查询里出现的排序列名翻成真实列名。
 // 对外名字必须与响应 JSON 的字段名一致（created_time / last_modified_time），否则控制台
-// 照搬 PowerJob 的那句默认查询 "status in (5, 6) order by last_modified_time desc" 一开弹窗
+// 兼容协议的那句默认查询 "status in (5, 6) order by last_modified_time desc" 一开弹窗
 // 就报 no such column；库里这两列叫 create_time / modify_time，所以在这一层映射掉。
 // 映射表取值写死，用户文本永远不进 SQL 文本。
 var orderColumn = map[string]string{
@@ -124,7 +124,7 @@ func parseTaskQuery(qs string) (where []string, args []any, order string, err er
 		if !qLimit.MatchString(tail) {
 			return nil, nil, "", fmt.Errorf("无法识别的限量写法：%q。%s", tail, queryHelp)
 		}
-		qs = strings.TrimSpace(qs[:i]) // 条数由服务端固定，忽略用户写的值（PowerJob 也是写死）
+		qs = strings.TrimSpace(qs[:i]) // 条数由服务端固定，忽略用户写的值（兼容协议也是写死）
 	}
 	qs = strings.TrimSpace(strings.TrimSuffix(qs, ";"))
 	// 只把开头的 where 关键字去掉，**不能整体 ToLower**：task_name 是大小写敏感的，
@@ -172,20 +172,20 @@ func parseTaskQuery(qs string) (where []string, args []any, order string, err er
 	return where, args, order, nil
 }
 
-// taskStatusFromOrdinal 认 PowerJob 的 TaskStatus 序号，也认 gojob 自己的状态名：
-// 从 PowerJob 习惯里敲 "status in (5,6)" 的人不少，而我们的库里存的是字符串。
+// taskStatusFromOrdinal 认兼容协议的 TaskStatus 序号，也认 gojob 自己的状态名：
+// 沿用那边习惯敲 "status in (5,6)" 的人不少，而我们的库里存的是字符串。
 func taskStatusFromOrdinal(raw string) string {
 	n, err := strconv.Atoi(raw)
 	if err != nil {
 		return strings.ToUpper(raw)
 	}
-	if s, ok := powerJobTaskOrdinal[n]; ok {
+	if s, ok := compatTaskOrdinal[n]; ok {
 		return s
 	}
 	return strconv.Itoa(n) // 认不出来就原样比较：命中 0 行，比报错或猜一个状态好
 }
 
-var powerJobTaskOrdinal = map[int]string{
+var compatTaskOrdinal = map[int]string{
 	1: protocol.TaskWaiting, // WAITING_DISPATCH
 	2: protocol.TaskWaiting, // DISPATCH_SUCCESS_WORKER_UNCHECK
 	3: protocol.TaskWaiting, // WORKER_RECEIVED
@@ -247,7 +247,7 @@ func (s *Server) detailPlus(c *gin.Context) {
 
 	where, args, order, qerr := parseTaskQuery(req.CustomQuery)
 	if qerr != nil {
-		// PowerJob 把解析失败抛成整个请求失败；这里改成照常返回实例信息 + 说明哪里写歪了，
+		// 兼容协议把解析失败抛成整个请求失败；这里改成照常返回实例信息 + 说明哪里写歪了，
 		// 详情弹窗的主体是实例，不该因为一句过滤条件白屏。
 		resp.QueryError = qerr.Error()
 		writeOK(c, resp)

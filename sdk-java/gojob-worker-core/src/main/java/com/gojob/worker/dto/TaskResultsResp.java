@@ -6,7 +6,7 @@ import java.util.List;
 /**
  * /worker/taskResults 的请求与响应（reduce 取子任务结果，分页）。
  *
- * <p>分页是必需的：PowerJob 的 LAST_TASK 从本机表一次性读全部结果，我们如果把这些结果
+ * <p>分页是必需的：兼容协议的 LAST_TASK 从本机表一次性读全部结果，我们如果把这些结果
  * 塞进拉取响应，一个几万子任务的实例会先在 HTTP 响应里把自己撑爆。
  */
 public class TaskResultsResp {

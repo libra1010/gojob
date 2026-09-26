@@ -2,7 +2,7 @@
 //
 // 为什么放在单独的文件里：dispatch.go 管的是"一条任务怎么从队列到 worker 再回来"，
 // 本文件管的是"很多条任务怎么合成一个实例的结论"。前者是 pull 模型的机械结构，
-// 后者是 PowerJob 语义里唯一需要重新设计的一部分——PowerJob 把这部分逻辑放在
+// 后者是兼容协议语义里唯一需要重新设计的一部分——兼容目标把这部分逻辑放在
 // worker 侧的 TaskTracker（子任务写本机 task_info 表、server 完全不知情），
 // gojob 的 worker 之间不通信，所以这棵树必须长在库里。
 package dispatch
@@ -19,13 +19,13 @@ import (
 	"gojob/server/store"
 )
 
-// 派生规模上限。PowerJob 靠 worker 本地表没有显式上限（只有内存与线程池），
+// 派生规模上限。兼容协议靠 worker 本地表没有显式上限（只有内存与线程池），
 // gojob 的子任务要进 DB 并参与每次认领，必须有硬上限，否则一次 map(100万个) 就是
 // 一次自伤式拒绝服务。超限直接判 map 失败，比让库卡死好查。
 const (
 	maxMapBatch        = 5000  // 单次 map() 的子任务数
 	maxInstanceTasks   = 50000 // 单实例任务行数（含各级子任务）
-	maxResultLength    = 8096  // 对齐 PowerJob PowerJobWorkerConfig.maxResultLength
+	maxResultLength    = 8096  // 结果文本上限，与兼容协议的 worker 配置 maxResultLength 同值
 	defaultResultsPage = 500
 	maxResultsPage     = 2000
 )
@@ -83,7 +83,7 @@ func syncInstance(tx *gorm.DB, instanceId uint64, c taskCounts, now time.Time) e
 // finishInstance 在"某个任务刚进入终态"之后重算实例形状并判断整棵任务树是否收敛。
 // 返回非空表示本次调用把实例推到了终态（依赖触发只在"本次刚成功"时生效，不能重复触发）。
 //
-// 收敛条件是"没有未终态的行"，不是 PowerJob 那句 unfinishedNum<=0 —— 同一件事的两种写法：
+// 收敛条件是"没有未终态的行"，不是兼容协议里那句 unfinishedNum<=0 —— 同一件事的两种写法：
 // 它数的是本机 task_info 表，我们数的是 instance_tasks 里这个实例的行。
 func finishInstance(tx *gorm.DB, task *store.InstanceTask, outcome string, now time.Time) (string, error) {
 	var inst store.JobInstance
@@ -100,7 +100,7 @@ func finishInstance(tx *gorm.DB, task *store.InstanceTask, outcome string, now t
 	if c.Running > 0 {
 		return "", nil // 树还没排空
 	}
-	// MAP_REDUCE 的最后一步此刻才生成 reduce 任务（PowerJob 的 OMS_LAST_TASK）：
+	// MAP_REDUCE 的最后一步此刻才生成 reduce 任务（兼容协议里的 OMS_LAST_TASK）：
 	// 它出现后未终态数重新变成 1，实例继续运行，直到它也收敛。
 	// 用户已经按下停止的实例不补这一步——那等于违背停止指令又起一个任务。
 	if inst.ExecuteType == protocol.ExecuteMapReduce && !isStopping(&inst) {
@@ -133,13 +133,13 @@ func isStopping(inst *store.JobInstance) bool {
 
 // settleInstance 任务树已排空，定实例终态与结果。
 //
-// 三条规则分别对应 PowerJob 的三处判定：
-//   - 有被停止的行且实例正在停止中 → STOPPED（用户意图优先，PowerJob 的 stopInstance
+// 三条规则分别对应兼容协议的三处判定：
+//   - 有被停止的行且实例正在停止中 → STOPPED（用户意图优先，兼容协议的 stopInstance
 //     是先落库 STOPPED 再不可靠地通知 worker，gojob 沿用既有的"等协作退出"实现）；
 //   - MAP_REDUCE → reduce 的返回值说了算，所以子任务部分失败时开发者可以自己兜住
-//     （PowerJob 同语义：实例状态取 LAST_TASK 的状态，result 取它的返回值）；
+//     （兼容协议同语义：实例状态取 LAST_TASK 的状态，result 取它的返回值）；
 //   - 其余（STANDALONE/BROADCAST/MAP）→ 任一任务最终失败即实例失败
-//     （PowerJob CommonTaskTracker 那句 success = failedNum == 0）。
+//     （兼容协议 CommonTaskTracker 那句 success = failedNum == 0）。
 func settleInstance(tx *gorm.DB, inst *store.JobInstance, c taskCounts, now time.Time) (string, error) {
 	status := protocol.InstanceSucceed
 	result := ""
@@ -191,7 +191,7 @@ func failedOrSucceed(c taskCounts) string {
 	return protocol.InstanceSucceed
 }
 
-// rootResult 根任务的返回值作为实例结果（PowerJob 把 root/last 任务的 ProcessResult.msg
+// rootResult 根任务的返回值作为实例结果（兼容协议把 root/last 任务的 ProcessResult.msg
 // 作为 instanceInfo.result 上报，非 MAP_REDUCE 型就是根任务那一份）。
 func rootResult(tx *gorm.DB, instanceId uint64) string {
 	var root store.InstanceTask
@@ -202,7 +202,7 @@ func rootResult(tx *gorm.DB, instanceId uint64) string {
 	return root.Result
 }
 
-// createReduceTask 生成 reduce 任务。宿主留空（任意在线节点可认领）是对 PowerJob 的
+// createReduceTask 生成 reduce 任务。宿主留空（任意在线节点可认领）是对兼容协议的
 // 一处刻意偏离：它必须把 LAST_TASK 钉回 TaskTracker 本机，因为子任务结果在那台机器的
 // 本地表里；gojob 的结果在库中，钉住只会多一个"那台机器挂了 reduce 永远没人跑"的失败模式。
 func createReduceTask(tx *gorm.DB, inst *store.JobInstance, now time.Time) error {
@@ -265,7 +265,7 @@ func discardDescendants(tx *gorm.DB, taskID uint64, now time.Time) (int, error) 
 	return discarded, nil
 }
 
-// MapTasks 处理处理器在运行期派生子任务的请求（PowerJob 的 ProcessorMapTaskRequest）。
+// MapTasks 处理处理器在运行期派生子任务的请求（兼容协议的 ProcessorMapTaskRequest）。
 //
 // 幂等靠 (parent_task_id, map_batch)：SDK 在 HTTP 层重放同一个批次时批次号不变，
 // 服务端看到"这批已经建齐了"就直接把已有行的 task_key 回回去，不重复派生。
@@ -322,7 +322,7 @@ func (d *Dispatcher) MapTasks(req *protocol.MapTaskReq) (*protocol.MapTaskResp, 
 			return struct{}{}, e
 		}
 		if len(existing) == len(req.SubTasks) && len(existing) > 0 {
-			// 同一批次重放：内容不重新校验，PowerJob 也是"以已落库的为准"
+			// 同一批次重放：内容不重新校验，兼容协议也是"以已落库的为准"
 			resp.TaskKeys = make([]string, 0, len(existing))
 			for i := range existing {
 				resp.TaskKeys = append(resp.TaskKeys, existing[i].TaskKey)
@@ -387,7 +387,7 @@ func (d *Dispatcher) MapTasks(req *protocol.MapTaskReq) (*protocol.MapTaskResp, 
 
 // TaskResults 分页取实例下所有子任务的执行结果，供 reduce 使用。
 //
-// 分页是给 reduce 的输入规模留后路：PowerJob 的 LAST_TASK 从本机表一次性读全部结果，
+// 分页是给 reduce 的输入规模留后路：兼容协议的 LAST_TASK 从本机表一次性读全部结果，
 // 我们如果把这些结果塞进 TaskDTO 随拉取响应下发，一个几万子任务的实例会先在 HTTP 响应里
 // 把自己撑爆。SDK 侧照样是一次 Reduce(ctx, results) 调用，只是内部翻页取满。
 func (d *Dispatcher) TaskResults(req *protocol.TaskResultsReq) (*protocol.TaskResultsResp, error) {
@@ -414,7 +414,7 @@ func (d *Dispatcher) TaskResults(req *protocol.TaskResultsReq) (*protocol.TaskRe
 		if t.TaskName != protocol.LastTaskName {
 			return struct{}{}, fmt.Errorf("task %d (%s) is not a reduce task", t.ID, t.TaskName)
 		}
-		// 口径与 PowerJob 的 getAllTaskResult 一致：除根与 reduce 自身之外的全部任务，
+		// 口径与兼容协议的 getAllTaskResult 一致：除根与 reduce 自身之外的全部任务，
 		// 也就是用户 map 出去的每一片（含多级 map 的中间层）。
 		// 每次重新构造查询：gorm 的 *DB 复用会把上一条的条件带进下一条。
 		q := func() *gorm.DB {
@@ -448,7 +448,7 @@ func (d *Dispatcher) TaskResults(req *protocol.TaskResultsReq) (*protocol.TaskRe
 	return out, nil
 }
 
-// truncResult 把处理器返回值裁到 maxResultLength，与 PowerJob 同口径：
+// truncResult 把处理器返回值裁到 maxResultLength，与兼容协议同口径：
 // 结果会被写进实例行并回给控制台，不设上限等于让一个 println 撑爆数据库。
 func truncResult(s string) string {
 	if len(s) <= maxResultLength {

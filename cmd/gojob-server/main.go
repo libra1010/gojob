@@ -64,6 +64,20 @@ func envDurOverride(key string, target *time.Duration) {
 	*target = d
 }
 
+// envBoolOverride 同 envIntOverride，目标是开关（"true"/"1"/"false"/"0" 都认）。
+func envBoolOverride(key string, target *bool) {
+	v := os.Getenv(key)
+	if v == "" {
+		return
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		log.Printf("WARNING: %s=%q 不是布尔值（true/false），沿用默认值", key, v)
+		return
+	}
+	*target = b
+}
+
 func main() {
 	addr := flag.String("addr", ":7700", "HTTP listen address")
 	driver := flag.String("driver", "sqlite", "db driver: sqlite | mysql | postgres")
@@ -76,6 +90,8 @@ func main() {
 	dbMaxIdle := flag.Int("db-max-idle-conns", 0, "数据库空闲连接保留数；0=跟随 --db-max-open-conns")
 	dbConnLife := flag.Duration("db-conn-max-lifetime", 0, "单条连接的最长存活时间，0=30m。数据库侧主备切换后要调小")
 	retentionDays := flag.Int("retention-days", 0, "历史实例保留天数：终态实例超过它就连同子任务、任务日志一起删；0=只认任务上配的 life_cycle；两边都不配则永不清理")
+	workerAESKeys := flag.String("worker-aes-keys", "", "注册口令加密的 AES-256 key，64 位 hex，逗号分隔多把只用于轮换期并存；留空=口令明文送上来（现状）")
+	workerAESRequired := flag.Bool("worker-aes-required", false, "配了 --worker-aes-keys 后进一步要求所有 worker/OpenAPI 注册必须走加密，明文注册直接拒绝")
 	flag.Parse()
 
 	envOverride("GOJOB_ADDR", addr)
@@ -89,6 +105,8 @@ func main() {
 	envIntOverride("GOJOB_DB_MAX_IDLE_CONNS", dbMaxIdle)
 	envDurOverride("GOJOB_DB_CONN_MAX_LIFETIME", dbConnLife)
 	envIntOverride("GOJOB_RETENTION_DAYS", retentionDays)
+	envOverride("GOJOB_WORKER_AES_KEYS", workerAESKeys)
+	envBoolOverride("GOJOB_WORKER_AES_REQUIRED", workerAESRequired)
 	if *publicURL == "" {
 		host, port, err := net.SplitHostPort(*addr)
 		if err == nil {
@@ -166,6 +184,16 @@ func main() {
 		log.Printf("WARNING: GOJOB_CLUSTER_SECRET 未设置，本进程用随机密钥签发令牌 —— " +
 			"单副本没问题，多副本部署会让令牌跨节点互不认（登录随机掉线、worker 随机 401）。" +
 			"多副本务必给所有节点配同一个值。")
+	}
+	// 注册口令加密：只影响"口令怎么送上来"这一步，链路其余部分照旧明文。
+	if err := authSet.EnableRegisterEncryption(*workerAESKeys, *workerAESRequired); err != nil {
+		log.Fatalf("worker register encryption: %v", err)
+	}
+	if authSet.Register.Enabled() {
+		log.Printf("worker register encryption: AES-256-GCM kid=%v encrypted-only=%v —— "+
+			"它只保证项目口令不出现在链路上，challenge/iv/密文照旧是明文传输的内容，"+
+			"任务参数与执行日志也不受它保护（那些要靠内网或前置 TLS）",
+			authSet.Register.Kids(), authSet.Register.Enforce())
 	}
 
 	// 本进程自监控：连接数挂 ConnState、请求数挂中间件，每 5s 采样并 upsert 进 server_nodes，

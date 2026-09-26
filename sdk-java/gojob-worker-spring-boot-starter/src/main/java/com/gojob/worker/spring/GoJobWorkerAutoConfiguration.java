@@ -24,7 +24,7 @@ import org.springframework.core.annotation.AnnotatedElementUtils;
  *   <li>按 {@link GoJobWorkerProperties}（前缀 {@code gojob.worker}）构建 core 的
  *       {@link GoJobWorker} 并 start；</li>
  *   <li>把容器内所有 {@link Processor} Bean 以其类全名注册（与 Server 端
- *       processor=Java 类全名 的分发语义一致，PowerJob 导入任务原样可用），
+ *       processor=Java 类全名 的分发语义一致，兼容协议导入任务原样可用），
  *       走 Spring 单例而非 SDK 内部反射 new，业务处理器可直接依赖注入；</li>
  *   <li>带 {@link GoJobProcessor} 注解的 Bean 额外以显式 name 注册；</li>
  *   <li>容器关闭时调用 {@link GoJobWorker#close()}：先停止收单，

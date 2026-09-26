@@ -11,7 +11,7 @@ import com.gojob.worker.ProcessResult;
  * <ol>
  *   <li>lambda + 手工注册名：Server 端 Job 的 processor 字段填 "hello"；</li>
  *   <li>类全名匹配：processor 字段填 "com.gojob.worker.examples.DemoProcessor"
- *       （PowerJob 导入的任务 processorInfo 即类全名，SDK 自动 Class.forName 实例化）。</li>
+ *       （兼容协议导入的任务 processorInfo 即类全名，SDK 自动 Class.forName 实例化）。</li>
  * </ol>
  *
  * <p>运行前确保 gojob Server 已启动，且已创建 app（app_id=demo / password=demo123），
@@ -21,10 +21,12 @@ public final class QuickStart {
 
     public static void main(String[] args) {
         // 与 Go demo 一致的覆盖方式：GOJOB_WORKER_SERVER / GOJOB_WORKER_APP / GOJOB_WORKER_PASSWORD
+        // 以及 GOJOB_WORKER_AES_KEY（配了则项目口令不再明文上线，须与服务端 GOJOB_WORKER_AES_KEYS 之一一致）
         OpenConfig config = new OpenConfig()
                 .setServerAddress(env("GOJOB_WORKER_SERVER", "http://127.0.0.1:7700"))
                 .setAppId(env("GOJOB_WORKER_APP", "demo"))
                 .setPassword(env("GOJOB_WORKER_PASSWORD", "demo123"))
+                .setAesKey(env("GOJOB_WORKER_AES_KEY", ""))
                 .setMaxConcurrency(8); // 默认 16，可省略
 
         GoJobWorker worker = new GoJobWorker(config);

@@ -1,6 +1,6 @@
 package com.gojob.worker;
 
-/** 业务处理器接口（对标 PowerJob 的 BasicProcessor）。 */
+/** 业务处理器接口（对标兼容协议的 BasicProcessor）。 */
 @FunctionalInterface
 public interface Processor {
 

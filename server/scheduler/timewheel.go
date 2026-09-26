@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// 内存时间轮（Timing Wheel），对齐 PowerJob InstanceTimeWheelService 的两层调度模型：
+// 内存时间轮（Timing Wheel），两层调度模型与兼容协议的 InstanceTimeWheelService 一致：
 // 粗扫线程按扫描周期把到期任务装载进轮子，精确到 tickSize 的触发由轮子完成。
 // 跨度 = tickSize × slotNum；超出跨度用 rounds 计数降级，因此可承载任意远延时
 // （本项目 FIXED_RATE/FIXED_DELAY 上限 120s，10ms×4096≈41s 一圈即可覆盖）。

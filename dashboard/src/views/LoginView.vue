@@ -40,8 +40,8 @@ async function onSubmit() {
       <div class="brand">
         <span class="logo">G</span>
         <div>
-          <h2>gojob 控制台</h2>
-          <p class="sub">PowerJob 兼容的 Go 调度框架</p>
+          <h2>gojob</h2>
+          <p class="sub">轻量级分布式任务调度平台 · 单二进制 · 零中间件</p>
         </div>
       </div>
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent="onSubmit">

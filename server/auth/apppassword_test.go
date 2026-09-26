@@ -52,7 +52,7 @@ func TestHashPasswordForm(t *testing.T) {
 }
 
 // 项目口令在库里必须是 bcrypt 摘要，且整行不得出现明文或其 md5 等价物
-// （曾经为 PowerJob authApp 存过 password_md5，该列已按"安全优先"删除）。
+// （曾为兼容层 authApp 存过 password_md5，该列已按"安全优先"删除）。
 func TestAppRowsCarryNoPasswordEquivalents(t *testing.T) {
 	st := newAppStore(t)
 	insertPlaintextApp(t, st, "a1", "pw-one")

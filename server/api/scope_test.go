@@ -195,7 +195,7 @@ func TestReadonlyAndSuperAdmin(t *testing.T) {
 	}
 }
 
-// 任务列表语义对齐 PowerJob 会话接口：index 从 0 起、keyword 命中任务名/描述、
+// 任务列表语义沿用兼容协议的会话接口：index 从 0 起、keyword 命中任务名/描述、
 // page_size<=0 一次给全（建单抽屉的上游候选要全量，不能被分页切掉）。
 func TestListJobsPagingAndKeyword(t *testing.T) {
 	e := newScopeEnv(t)
@@ -237,7 +237,7 @@ func TestExportThenImportRoundTrip(t *testing.T) {
 	tk := e.addUser(t, "root", "SUPER_ADMIN", "*")
 	jobId := e.addJob(t, "app1", "roundtrip")
 
-	got := getAs[protocol.PowerJobJob](t, &workerEnv{s: e.s, r: e.r},
+	got := getAs[protocol.JobDTO](t, &workerEnv{s: e.s, r: e.r},
 		"/openapi/job/export?job_id="+uitoa(jobId), tk)
 	if got.Code != protocol.CodeOK {
 		t.Fatalf("export code=%d msg=%q", got.Code, got.Message)

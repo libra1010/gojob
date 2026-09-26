@@ -6,7 +6,7 @@ export function listInstances(jobId: number) {
 }
 
 /**
- * 实例详情（对齐 PowerJob 的 /instance/detailPlus）：实例行 + Task 统计 + 一页子任务。
+ * 实例详情（对应兼容协议的 /instance/detailPlus）：实例行 + Task 统计 + 一页子任务。
  * customQuery 是"select * from task_info where ___ limit 10"里的那一段，
  * 后端只认白名单语法，写歪了会在 query_error 里给出原因而不是让整个请求失败。
  */

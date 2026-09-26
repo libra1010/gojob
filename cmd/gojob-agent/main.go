@@ -5,7 +5,7 @@
 //	gojob-agent
 //
 // 控制台的「处理器信息」填 tech.powerjob.official.processors.impl.script.ShellProcessor
-// （或短名 shell），脚本正文放「任务参数」——与 PowerJob 的官方脚本处理器同一种配法。
+// （或短名 shell），脚本正文放「任务参数」——与兼容协议的官方脚本处理器同一种配法。
 //
 // 安全默认值刻意偏保守：只执行 GOJOB_AGENT_SCRIPT_DIR 里预置的脚本。原因见 README
 // 「gojob-agent：不写代码的执行节点」一节——建任务只要项目口令，若参数即脚本，
@@ -116,7 +116,7 @@ func main() {
 		Workspace:   *workspace,
 		Timeout:     *timeout,
 	}
-	// 主名用 PowerJob 官方处理器的类全名（同一份任务配置两边通用），短名 shell 是 gojob 别名
+	// 主名用兼容协议官方处理器的类全名（同一份任务配置两边通用），短名 shell 是 gojob 别名
 	worker.Register(protocol.OfficialShellProcessor, sh)
 	worker.Register(agent.ShellAliasName, sh)
 	if *inline {
@@ -133,6 +133,8 @@ func main() {
 		Password:        *password,
 		Tag:             *tag,
 		MaxConcurrency:  *concurrency,
+		// 注册口令加密只走环境变量：key 与口令同为凭据，不该出现在 --aes-key 这种 ps 可见的地方
+		AesKey: envOr("GOJOB_WORKER_AES_KEY", ""),
 	})
 	log.Printf("执行节点启动：app=%s 脚本库=%s 允许内联脚本=%t 单次上限=%s 并发=%d tag=%s",
 		*appId, orNA(*scripts), *inline, orUnlimited(*timeout), *concurrency, *tag)

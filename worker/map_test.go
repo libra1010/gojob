@@ -200,7 +200,7 @@ func TestMapBatchNumberIncrements(t *testing.T) {
 	}
 }
 
-// STANDALONE 里调 map 是配置写错，必须报错而不是静默忽略（PowerJob 同语义）。
+// STANDALONE 里调 map 是配置写错，必须报错而不是静默忽略（兼容协议同语义）。
 func TestMapRejectedOutsideMapTypes(t *testing.T) {
 	f := &mrFake{}
 	w := newMRWorker(t, f)

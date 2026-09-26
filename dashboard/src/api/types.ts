@@ -207,13 +207,13 @@ export interface NodesResp {
 // ---------- Job（任务） ----------
 
 /**
- * PowerJob 的 ProcessorType（5.1.2 枚举）：BUILT_IN(内建，按 worker 注册名/类全名解析) /
- * EXTERNAL(外置，PowerJob 用 JAR 动态容器，gojob 的 worker 会直接判失败)。
- * SHELL/PYTHON 在 PowerJob 已 @Deprecated，导入时会被改写成 BUILT_IN + 官方脚本处理器。
+ * 兼容协议的 ProcessorType（5.1.2 枚举）：BUILT_IN(内建，按 worker 注册名/类全名解析) /
+ * EXTERNAL(外置，兼容协议用 JAR 动态容器，gojob 的 worker 会直接判失败)。
+ * SHELL/PYTHON 在兼容协议里已 @Deprecated，导入时会被改写成 BUILT_IN + 官方脚本处理器。
  */
 export type ProcessorType = 'BUILT_IN' | 'EXTERNAL'
 /**
- * 执行类型，与 PowerJob ExecuteType 枚举同名同值。
+ * 执行类型，与兼容协议 ExecuteType 枚举同名同值。
  * WORKFLOW 属于工作流引擎，gojob 未实现（任务前后置关系用时间类型 DEPENDENCY 表达），
  * 因此不出现在建单下拉里。
  */
@@ -228,10 +228,10 @@ export type TimeExpressionType =
   | 'API'
   | 'DEPENDENCY'
 
-/** 分发策略：1/2/11 与 PowerJob DispatchStrategy 同值，21 是 gojob 扩展（PowerJob 无轮询） */
+/** 分发策略：1/2/11 与兼容协议 DispatchStrategy 同值，21 是 gojob 扩展（兼容协议无轮询） */
 export type DispatchStrategy = 1 | 2 | 11 | 21
 
-/** 每日固定间隔表达式（JSON 存进 time_expression），对齐 PowerJob DailyTimeIntervalExpress */
+/** 每日固定间隔表达式（JSON 存进 time_expression），形状为兼容协议的 DailyTimeIntervalExpress */
 export interface DailyIntervalExpress {
   interval: number
   intervalUnit?: 'MILLISECONDS' | 'SECONDS' | 'MINUTES' | 'HOURS'
@@ -331,7 +331,7 @@ export interface ModifyJobReq {
 
 export type JobAction = 'pause' | 'resume' | 'trigger'
 
-/** 列表接口的分页包装，语义对齐 PowerJob 的 PageResult：index 从 0 起，page_size<=0 表示一次给全量 */
+/** 列表接口的分页包装，语义与兼容协议的 PageResult 一致：index 从 0 起，page_size<=0 表示一次给全量 */
 export interface PageResult<T> {
   index: number
   page_size: number
@@ -340,7 +340,7 @@ export interface PageResult<T> {
   data: T[] | null
 }
 
-/** 任务列表查询条件（PowerJob 任务管理页只有这两个过滤器：任务 ID 精确 + 关键字模糊） */
+/** 任务列表查询条件（兼容协议的任务管理页只有这两个过滤器：任务 ID 精确 + 关键字模糊） */
 export interface JobListQuery {
   app_id: string
   /** 0 基页码 */
@@ -358,10 +358,10 @@ export interface OperateJobReq {
   instance_params?: string
 }
 
-// ---------- PowerJob 导入 ----------
+// ---------- 任务包导入导出（通用 JobDTO 格式） ----------
 
-/** PowerJob 控制台导出的 JobDTO（camelCase），与 protocol.PowerJobJob 对齐 */
-export interface PowerJobJob {
+/** 通用任务包里的单条任务（camelCase JobDTO），与 protocol.JobDTO 一一对应 */
+export interface JobDTO {
   jobName?: string
   jobDescription?: string
   timeExpressionType?: string
@@ -379,7 +379,7 @@ export interface PowerJobJob {
   dispatchStrategy?: number
   dispatchStrategyConfig?: string
   enable?: boolean
-  /** gojob 扩展字段：PowerJob 的导入方会忽略未知键，gojob 自己导出再导入则不丢配置 */
+  /** gojob 扩展字段：外部导入方会忽略未知键，gojob 自己导出再导入则不丢配置 */
   instanceParams?: string
   skipWhenRunning?: boolean
   logLevel?: string
@@ -387,7 +387,7 @@ export interface PowerJobJob {
 
 export interface ImportJobsReq {
   app_id: string
-  jobs: PowerJobJob[]
+  jobs: JobDTO[]
 }
 
 export interface ImportJobItem {
@@ -426,7 +426,7 @@ export interface JobInstance {
   fixed_params: string
   /** 建单时从任务抄下来的执行类型：决定这是一次执行还是一棵任务树 */
   execute_type?: ExecuteType | string
-  /** 实例级结果（PowerJob InstanceInfoDO.result）：MAP_REDUCE 取 reduce 的返回值，其余取根任务 */
+  /** 实例级结果（兼容协议 InstanceInfoDO.result）：MAP_REDUCE 取 reduce 的返回值，其余取根任务 */
   result?: string
   running_times: number
   try_times: number
@@ -469,7 +469,7 @@ export interface InstanceTask {
   execute_type?: ExecuteType | string
 }
 
-/** 实例详情弹窗（POST /openapi/instance/detailPlus）——对齐 PowerJob 的 InstanceDetail */
+/** 实例详情弹窗（POST /openapi/instance/detailPlus）——对应兼容协议的 InstanceDetail */
 export interface TaskInfoRow {
   task_id: string
   task_name: string

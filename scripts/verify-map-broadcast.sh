@@ -4,8 +4,8 @@
 #   ① BROADCAST：在线节点每台恰好一份、落在不同节点上、层次号 0.1/0.2，根任务自己不占执行节点；
 #   ② BROADCAST 落在零个在线节点上：当场收敛，不留一个永远等不到回报的实例；
 #   ③ MAP：根任务运行期派生子任务，树全部收尾实例才进终态，实例的任务进度列跟着涨；
-#   ④ MAP 多级派生：子任务还能继续 map（PowerJob 同语义），层次号长成 0.1.2；
-#   ⑤ MAP：任一子任务最终失败 ⇒ 实例失败（PowerJob 那句 success = failedNum == 0）；
+#   ④ MAP 多级派生：子任务还能继续 map（兼容协议同语义），层次号长成 0.1.2；
+#   ⑤ MAP：任一子任务最终失败 ⇒ 实例失败（兼容协议那句 success = failedNum == 0）；
 #   ⑥ MAP_REDUCE：树排空之后才补出 reduce 任务（OMS_LAST_TASK，层次号 9999），它的返回值就是实例结果；
 #   ⑦ MAP_REDUCE 容忍部分失败：reduce 兜住就 SUCCEED —— ⑤ 与 ⑦ 合起来才是 MAP 与 MAP_REDUCE 的分界；
 #   ⑧ MAP_REDUCE：reduce 自己判失败 ⇒ 实例失败，结果取 reduce 那句错误；
@@ -15,7 +15,7 @@
 #   ⑫ 实例详情接口：Task 统计 + 控制台那句 "select * from task_info where … limit 10"，注入写法被挡在白名单外；
 #   ⑬ 建单对未实现执行类型（SHARDING/未知值）当条给出可操作原因，导入仍用执行类型名字符串。
 #
-# 一条既定语义没在这里演：广播子任务在执行节点失联时判失败、不换机重派（PowerJob issue #1003）。
+# 一条既定语义没在这里演：广播子任务在执行节点失联时判失败、不换机重派（兼容协议 issue #1003）。
 # 它的判活阈值是 5 分钟，实机等不起，由 server/dispatch/multitask_test.go 覆盖。
 #
 # 用法: scripts/verify-map-broadcast.sh      （可用 GO/PORT/APP/PW/SECRET 覆盖）
@@ -133,7 +133,7 @@ try: print($2)
 except Exception as e: print('expr-error',e)
 "
 }
-# dp <实例 id> <查询串> → 实例详情接口（PowerJob 的 detailPlus 同位）的原始响应
+# dp <实例 id> <查询串> → 实例详情接口（兼容协议的 detailPlus 同位）的原始响应
 dp() {
   local body
   body=$(printf '{"instance_id":%s,"app_id":"%s","custom_query":%s}' \
@@ -270,7 +270,7 @@ want_status "一片失败就把整个 Map 判失败" FAILED "$I6"
 eq "实例计数里就是那一片失败" "1" "$(inst_field "$I6" failed_task_num)"
 eq "另外两片仍然成功（失败不牵连别的片）" "2" \
   "$(tcalc "$I6" "len([t for t in ts if t['status']=='SUCCEED' and t['parent_task_id']!=0])")"
-contains "实例结果取根任务那句（PowerJob 用 root 的 ProcessResult）" "第 2 片会失败" "$(inst_field "$I6" result)"
+contains "实例结果取根任务那句（兼容协议取 root 的 ProcessResult）" "第 2 片会失败" "$(inst_field "$I6" result)"
 
 echo
 echo "== 7. MAP_REDUCE：树排空才补出 reduce，它的返回值就是实例结果"
@@ -343,7 +343,7 @@ eq "详情接口带上实例本身" "$I7" "$(jget "$D" "root['data']['instance']
 eq "Task 统计：总数" "6" "$(jget "$D" "root['data']['task_stats']['total']")"
 eq "Task 统计：成功" "6" "$(jget "$D" "root['data']['task_stats']['succeed']")"
 eq "Task 统计：未收敛" "0" "$(jget "$D" "root['data']['task_stats']['waiting']+root['data']['task_stats']['running']")"
-eq "按状态查（PowerJob 的序号 6=成功）" "6" "$(qtotal "$I7" 'status = 6')"
+eq "按状态查（兼容协议的序号 6=成功）" "6" "$(qtotal "$I7" 'status = 6')"
 eq "按状态查（5=失败）" "0" "$(qtotal "$I7" 'status = 5')"
 eq "按任务名查 reduce" "1" "$(qtotal "$I7" "task_name = 'OMS_LAST_TASK'")"
 eq "按任务名查子任务片" "4" "$(qtotal "$I7" "task_name = 'NUM'")"
@@ -352,8 +352,8 @@ eq "条件之间能用 and 连接" "1" "$(qtotal "$I7" "task_name = 'OMS_LAST_TA
 ROOT_ID=$(rootid "$I7")
 eq "按父任务查" "4" "$(qtotal "$I7" "parent_task_id = $ROOT_ID")"
 eq "合法排序照单收下" "6" "$(qtotal "$I7" 'status = 6 order by id desc')"
-eq "limit 后缀照单收下（条数由服务端固定，与 PowerJob 同）" "6" "$(qtotal "$I7" 'status = 6 limit 10')"
-# 详情弹窗一打开就是这句话（照抄 PowerJob）。它曾经报 no such column: last_modified_time——
+eq "limit 后缀照单收下（条数由服务端固定，与兼容协议同）" "6" "$(qtotal "$I7" 'status = 6 limit 10')"
+# 详情弹窗一打开就是这句话（沿用兼容协议的默认查询）。它曾经报 no such column: last_modified_time——
 # 排序列名是响应字段名，库里的列叫 modify_time，只有真查库才暴露，所以这里也钉一条。
 eq "控制台默认那句真能查" "6" "$(qtotal "$I7" 'status in (5, 6) order by last_modified_time desc')"
 BAD=$(dp "$I7" 'status = 6 order by result desc')
@@ -380,7 +380,7 @@ contains "未知执行类型也被拒（不是悄悄回落单机）" "未知执�
 contains "工作流类型当条说明没有引擎" "WORKFLOW" "$(mkjob wf hello "" WORKFLOW)"
 RESP=$(api "$BASE" /openapi/job/import -H 'Content-Type: application/json' \
   -d "$(printf '{"app_id":"%s","jobs":[{"jobName":"import-broadcast","timeExpressionType":"API","processorType":"BUILT_IN","processorInfo":"broadcastEcho","executeType":"BROADCAST","jobParams":"-"}]}' "$APP")")
-contains "导入按执行类型名字符串收（与 PowerJob 导出格式一致）" "import-broadcast" "$RESP"
+contains "导入按执行类型名字符串收（与兼容协议导出格式一致）" "import-broadcast" "$RESP"
 eq "导入的广播任务执行类型落库正确" "BROADCAST" "$(job_field import-broadcast execute_type)"
 want_status "导入的广播任务真的能跑" SUCCEED "$(run import-broadcast)"
 

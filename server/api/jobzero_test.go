@@ -79,7 +79,7 @@ func TestCreateJobFillsDefaultsWhenAbsent(t *testing.T) {
 	}
 }
 
-// TestModifyJobAcceptsZeroRetry 修改路径也要能把重试次数改回 0：PowerJob 的
+// TestModifyJobAcceptsZeroRetry 修改路径也要能把重试次数改回 0：兼容协议的
 // taskRetryNum=0 很常见，导入进来的任务同样得能表达。
 func TestModifyJobAcceptsZeroRetry(t *testing.T) {
 	e := newScopeEnv(t)

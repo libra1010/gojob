@@ -27,7 +27,7 @@ import org.springframework.stereotype.Service;
 @SpringBootApplication
 public class SpringDemoApplication {
 
-    /** 用法一：普通 @Service，按类全名分发（与 PowerJob 导入任务语义一致）。 */
+    /** 用法一：普通 @Service，按类全名分发（与兼容协议导入任务语义一致）。 */
     @Service
     public static class Hello implements Processor {
 

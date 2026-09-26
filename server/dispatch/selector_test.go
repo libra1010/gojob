@@ -36,7 +36,7 @@ func job(strategy int, cfg string) *store.JobInfo {
 }
 
 func TestHealthFirstPicksFreshestNode(t *testing.T) {
-	// 同机器规格下，已用内存少 + CPU 负载低者优先（PowerJob: (max-used)*2 + (cores-load)）
+	// 同机器规格下，已用内存少 + CPU 负载低者优先（兼容协议口径：(max-used)*2 + (cores-load)）
 	busy := worker("app1", "10.0.0.1:1", 8, 7.5, 7000, 8000, "")
 	idle := worker("app1", "10.0.0.2:1", 8, 0.2, 1000, 8000, "")
 	d := newTestDispatcher(t, busy, idle)
@@ -118,7 +118,7 @@ func TestPickTargetWithoutOnlineWorkerReturnsEmpty(t *testing.T) {
 	}
 }
 
-func TestHealthScoreMatchesPowerJobFormula(t *testing.T) {
+func TestHealthScoreMatchesCompatFormula(t *testing.T) {
 	// (16000-2000)*2 + (16-4) = 28012
 	w := worker("app1", "10.0.0.1:1", 16, 4, 2000, 16000, "")
 	if got := healthScore(w); got != 28012 {

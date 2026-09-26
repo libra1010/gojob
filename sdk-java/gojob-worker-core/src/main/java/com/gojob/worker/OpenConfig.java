@@ -48,8 +48,27 @@ public class OpenConfig {
     /** 机器标签，供 SPECIFY 分发策略（tagIn:/tagEquals:）匹配；可逗号分隔多标签。 */
     private String tag = "";
 
+    /**
+     * 注册口令加密的 key（64 位 hex，AES-256），须与服务端 {@code GOJOB_WORKER_AES_KEYS}
+     * 中的某一把一致。配了它，项目口令就不再出现在链路上（注册走一次性 challenge +
+     * AES-256-GCM）；留空则口令明文送上来。
+     *
+     * <p>配了 key 而服务端未启用加密 ⇒ 注册失败并指出是哪一侧没配，<b>不会静默退回明文</b>：
+     * 静默降级等于给链路上的中间人一个"抹掉加密"的开关。所以升级顺序是先配服务端、再配 worker。
+     */
+    private String aesKey = "";
+
     public String getServerAddress() {
         return serverAddress;
+    }
+
+    public String getAesKey() {
+        return aesKey;
+    }
+
+    public OpenConfig setAesKey(String aesKey) {
+        this.aesKey = aesKey == null ? "" : aesKey.trim();
+        return this;
     }
 
     public OpenConfig setServerAddress(String serverAddress) {

@@ -130,7 +130,7 @@ func TestFenceBlocksZombieOwner(t *testing.T) {
 	clk.Advance(LeaseTTL + time.Second)
 	b.Sync()
 	if a.Fence(st.DB, "app1") {
-		t.Fatal("僵尸主的 fencing 必须被拒（PowerJob 在这一场景没有防护）")
+		t.Fatal("僵尸主的 fencing 必须被拒（兼容协议在这一场景没有防护）")
 	}
 	// fencing 被拒应顺带交出本地归属，避免后面每次都白撞一次
 	if a.Owns("app1") {

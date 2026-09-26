@@ -1,5 +1,5 @@
-// 分发策略（PowerJob TaskTrackerSelector 的 Go 移植）。
-// 在任务入队时预选执行机器，PowerJob 在推送前做同样的选择，pull 模型只是把投递改为取件。
+// 分发策略（兼容协议 TaskTrackerSelector 的 Go 移植）。
+// 在任务入队时预选执行机器，兼容目标在推送前做同样的选择，pull 模型只是把投递改为取件。
 package dispatch
 
 import (
@@ -55,14 +55,14 @@ func (d *Dispatcher) PickTarget(job *store.JobInfo) string {
 			}
 		}
 		if len(matched) == 0 {
-			// 同 PowerJob SpecifyTaskTrackerSelector：条件落空降级随机并告警
+			// 与兼容协议的 SpecifyTaskTrackerSelector 一致：条件落空降级随机并告警
 			log.Printf("job %d: dispatch_strategy_config %q matched no worker, fallback to random", job.ID, job.DispatchStrategyConfig)
 			return ws[rand.IntN(len(ws))].InstanceId
 		}
 		return matched[rand.IntN(len(matched))].InstanceId
 	case protocol.DispatchRoundRobin:
 		return ws[d.cursor(job.ID, uint64(len(ws)))].InstanceId
-	default: // HEALTH_FIRST 及未识别值，与 PowerJob DispatchStrategy.of(null)=HEALTH_FIRST 一致
+	default: // HEALTH_FIRST 及未识别值，与兼容协议 DispatchStrategy.of(null)=HEALTH_FIRST 的行为一致
 		sort.SliceStable(ws, func(i, j int) bool {
 			si, sj := healthScore(ws[i]), healthScore(ws[j])
 			if si != sj {
@@ -78,7 +78,7 @@ func (d *Dispatcher) PickTarget(job *store.JobInfo) string {
 //
 // 不套分发策略——"每台一份"本身就是分发结果，再按健康分选一次只会漏掉节点。
 // 只有 designated_workers 仍然生效（那是"这个任务只允许在这几台上跑"的硬约束，
-// 与 PowerJob 的 designatedWorkers 同语义），地址按 instance_id 稳定排序，
+// 与兼容协议的 designatedWorkers 同语义），地址按 instance_id 稳定排序，
 // 让同一批在线节点在两个副本上算出的 task_key 序号一致，排查时不用猜。
 func (d *Dispatcher) BroadcastTargets(job *store.JobInfo) []string {
 	ws := d.candidates(job)
@@ -90,7 +90,7 @@ func (d *Dispatcher) BroadcastTargets(job *store.JobInfo) []string {
 	return out
 }
 
-// healthScore 移植 PowerJob SystemMetrics.calculateScore：内存权重 2，CPU 余量权重 1。
+// healthScore 移植兼容协议的 SystemMetrics.calculateScore：内存权重 2，CPU 余量权重 1。
 // worker 未上报内存上限时退化为"已用内存越少越优"，保持同向可排序。
 func healthScore(w protocol.WorkerInfo) float64 {
 	mem := w.MemoryMax - w.MemoryUsed
@@ -98,13 +98,13 @@ func healthScore(w protocol.WorkerInfo) float64 {
 		mem = -w.MemoryUsed
 	}
 	cpu := float64(w.CpuProcessors) - w.CpuLoad
-	if cpu > float64(w.CpuProcessors) { // 取不到 CPU 负载（负值）时的兜底，同 PowerJob
+	if cpu > float64(w.CpuProcessors) { // 取不到 CPU 负载（负值）时的兜底，与兼容协议一致
 		cpu = 1
 	}
 	return mem*2 + cpu
 }
 
-// matchSpecify 移植 PowerJob SpecifyUtils.match：tagEquals: 全等、tagIn: 子串、默认逗号分隔 IP·tag 全等。
+// matchSpecify 移植兼容协议的 SpecifyUtils.match：tagEquals: 全等、tagIn: 子串、默认逗号分隔 IP·tag 全等。
 func matchSpecify(w protocol.WorkerInfo, specifyInfo string) bool {
 	specifyInfo = strings.TrimSpace(specifyInfo)
 	if specifyInfo == "" {

@@ -44,7 +44,7 @@ func TestNextByTypeUnitsAreMilliseconds(t *testing.T) {
 
 func TestFrequencyIntervalUpperBound(t *testing.T) {
 	now := time.Now()
-	// 对齐 PowerJob FREQUENT_JOB_MAX_INTERVAL=120000ms
+	// 与兼容协议的 FREQUENT_JOB_MAX_INTERVAL 默认值同值：120000ms
 	if _, err := NextByType("FIXED_RATE", "120001", now, now); err == nil {
 		t.Fatal("interval over 120000ms must be rejected")
 	}
@@ -205,7 +205,7 @@ func TestDailyTimeIntervalWindowSemantics(t *testing.T) {
 	// 早于窗口起点：吸附到当天 09:00:00
 	early := time.Date(2026, 9, 23, 7, 0, 0, 0, time.Local)
 	got, _ = NextByType("DAILY_TIME_INTERVAL", expr, early, early)
-	// 07:00+30min=07:30 仍早于窗口起点 → 吸附到 09:00:00（对齐 PowerJob calculateInRangeTime）
+	// 07:00+30min=07:30 仍早于窗口起点 → 吸附到 09:00:00（兼容协议 calculateInRangeTime 的行为）
 	if want := time.Date(2026, 9, 23, 9, 0, 0, 0, time.Local); !got.Equal(want) {
 		t.Fatalf("before-window got %s want %s", got, want)
 	}

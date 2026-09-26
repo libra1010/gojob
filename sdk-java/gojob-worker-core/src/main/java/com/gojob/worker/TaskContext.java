@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gojob.worker.internal.TaskLogger;
 import java.util.List;
 
-/** 传给 {@link Processor} 的执行上下文（对标 PowerJob JobContext 的子集）。 */
+/** 传给 {@link Processor} 的执行上下文（对标兼容协议 JobContext 的子集）。 */
 public final class TaskContext {
 
     private static final ObjectMapper PARAM_MAPPER =
@@ -59,7 +59,7 @@ public final class TaskContext {
         this.worker = worker;
     }
 
-    /** 层次任务号（PowerJob 的 TaskContext#getTaskId 是字符串形态，这里同名同形）。 */
+    /** 层次任务号（兼容协议的 TaskContext#getTaskId 是字符串形态，这里同名同形）。 */
     public String getTaskKey() {
         return taskKey;
     }
@@ -79,7 +79,7 @@ public final class TaskContext {
         return taskKey == null || taskKey.isEmpty() || "0".equals(taskKey);
     }
 
-    /** 是否为 reduce 任务（PowerJob 的 OMS_LAST_TASK）。 */
+    /** 是否为 reduce 任务（兼容协议的 OMS_LAST_TASK）。 */
     public boolean isLastTask() {
         return "OMS_LAST_TASK".equals(taskName);
     }
@@ -131,10 +131,10 @@ public final class TaskContext {
     }
 
     /**
-     * 派生子任务并交给集群执行（对标 PowerJob 的 MapProcessor.map）。
+     * 派生子任务并交给集群执行（对标兼容协议的 MapProcessor.map）。
      *
      * <p>每个元素单独 JSON 编码，因此负载必须是可跨进程解码的普通数据——我们的 worker 池是
-     * Go/Java 混布的，PowerJob 那套 JDK 序列化在这里读不出来。
+     * Go/Java 混布的，兼容协议那套 JDK 序列化在这里读不出来。
      *
      * @return 服务端为这批子任务分配的任务号
      * @throws GoJobException 执行类型不允许 map、任务名是保留名、或服务端拒绝
@@ -203,7 +203,7 @@ public final class TaskContext {
         return jobParams;
     }
 
-    /** runJob 触发时携带的动态参数原文（对标 PowerJob instanceParams），可能为 null/空串。 */
+    /** runJob 触发时携带的动态参数原文（对标兼容协议 instanceParams），可能为 null/空串。 */
     public String getInstanceParams() {
         return instanceParams;
     }

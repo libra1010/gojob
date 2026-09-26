@@ -7,6 +7,12 @@
 #                                                         # 零代码脚本节点（默认不起，见下）
 #   打开 http://localhost:8080  （admin / admin123）
 #
+# docker.io 拉不动的机器（国内）用镜像版 Dockerfile 构建：基础镜像换成华为云 SWR 的搬运
+# 副本、构建期模块代理走 goproxy.cn。三个 Go 服务共用同一个开关，默认仍是 Dockerfile：
+#   GOJOB_DOCKERFILE=Dockerfile.cn docker compose up -d --build
+# 注意这只覆盖**我们自己那三个镜像**；mysql / postgres / curlimages 是上游镜像，
+# 要换源得各自改 image 行（或配 docker daemon 的 registry-mirrors）。
+#
 # 多副本：compose 默认只起一个 server。要跑多个副本，把后端换成
 # mysql/postgres（sqlite 卷不能跨容器共享），给所有副本配同一个 GOJOB_CLUSTER_SECRET，
 # 并给每个副本配一份"worker 打得通"的 GOJOB_PUBLIC_URL（宿主机地址 + 各自映射的端口）：
@@ -21,6 +27,7 @@ services:
   gojob-server:
     build:
       context: .
+      dockerfile: ${GOJOB_DOCKERFILE:-Dockerfile}
       args:
         BUILD_TARGET: gojob-server
         GOJOB_VERSION: ${GOJOB_VERSION:-dev}
@@ -37,6 +44,10 @@ services:
       GOJOB_PUBLIC_URL: ${GOJOB_PUBLIC_URL:-http://localhost:7700}
       # 多副本部署时必须显式设为同一个值；compose 默认单副本，留空即可
       GOJOB_CLUSTER_SECRET: ${GOJOB_CLUSTER_SECRET:-}
+      # 注册口令加密（口令不再明文上链路）。留空=不启用；多副本必须各节点配同一套。
+      # 见 README「注册口令加密」与 .env.example 的说明。
+      GOJOB_WORKER_AES_KEYS: ${GOJOB_WORKER_AES_KEYS:-}
+      GOJOB_WORKER_AES_REQUIRED: ${GOJOB_WORKER_AES_REQUIRED:-false}
       # 历史实例保留天数。compose 默认给 30 天——容器化部署通常是长期运行的调度中心，
       # 三张历史表不清理迟早拖慢热路径。想按任务单独控制就配 0，改在任务的 life_cycle 上。
       GOJOB_RETENTION_DAYS: ${GOJOB_RETENTION_DAYS:-30}
@@ -118,6 +129,7 @@ services:
   gojob-demo:
     build:
       context: .
+      dockerfile: ${GOJOB_DOCKERFILE:-Dockerfile}
       args:
         BUILD_TARGET: gojob-demo
     image: gojob/gojob-demo:latest
@@ -126,6 +138,8 @@ services:
       GOJOB_WORKER_SERVER: http://gojob-server:7700
       GOJOB_WORKER_APP: ${GOJOB_DEMO_APP_ID:-demo_app}
       GOJOB_WORKER_PASSWORD: ${GOJOB_DEMO_APP_PASSWORD:-demo123}
+      # 与服务端 GOJOB_WORKER_AES_KEYS 之一一致；配了它口令不再明文上链路
+      GOJOB_WORKER_AES_KEY: ${GOJOB_WORKER_AES_KEY:-}
       GOJOB_WORKER_DRAIN_ADDR: ":7799"
     ports:
       - "7799:7799"   # POST /drain /resume 优雅下线演示
@@ -145,6 +159,7 @@ services:
     profiles: ["agent"]
     build:
       context: .
+      dockerfile: ${GOJOB_DOCKERFILE:-Dockerfile}
       args:
         BUILD_TARGET: gojob-agent
         GOJOB_VERSION: ${GOJOB_VERSION:-dev}
@@ -154,6 +169,8 @@ services:
       GOJOB_WORKER_SERVER: http://gojob-server:7700
       GOJOB_WORKER_APP: ${GOJOB_DEMO_APP_ID:-demo_app}
       GOJOB_WORKER_PASSWORD: ${GOJOB_DEMO_APP_PASSWORD:-demo123}
+      # 与服务端 GOJOB_WORKER_AES_KEYS 之一一致；执行节点能跑命令，口令更不该上线
+      GOJOB_WORKER_AES_KEY: ${GOJOB_WORKER_AES_KEY:-}
       # 白名单目录：任务参数只给裸文件名时到这里找，越界路径直接拒。留空则拒绝启动。
       GOJOB_AGENT_SCRIPT_DIR: ${GOJOB_SCRIPT_LIB:-/opt/gojob/scripts}
       # 内联脚本文本（任务参数里直接放一段 shell）默认被拒，开了才执行，且启动时打 WARNING

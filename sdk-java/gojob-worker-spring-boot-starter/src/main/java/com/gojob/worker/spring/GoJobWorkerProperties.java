@@ -52,6 +52,13 @@ public class GoJobWorkerProperties {
     /** 机器标签，供 SPECIFY 分发策略匹配（gojob.worker.tag）。 */
     private String tag = "";
 
+    /**
+     * 注册口令加密的 key（64 位 hex，AES-256），须与服务端 GOJOB_WORKER_AES_KEYS 之一一致。
+     * 配了它项目口令就不再明文上线（gojob.worker.aes-key）；留空则明文。
+     * 配了 key 而服务端未启用加密 ⇒ 注册失败并指出是哪一侧没配，不会静默退回明文。
+     */
+    private String aesKey = "";
+
     public boolean isEnable() {
         return enable;
     }
@@ -140,6 +147,14 @@ public class GoJobWorkerProperties {
         this.tag = tag;
     }
 
+    public String getAesKey() {
+        return aesKey;
+    }
+
+    public void setAesKey(String aesKey) {
+        this.aesKey = aesKey;
+    }
+
     /** 转成 core 的 {@link com.gojob.worker.OpenConfig}。 */
     public com.gojob.worker.OpenConfig toOpenConfig() {
         com.gojob.worker.OpenConfig config = new com.gojob.worker.OpenConfig()
@@ -151,7 +166,8 @@ public class GoJobWorkerProperties {
                 .setHeartBeatSeconds(heartBeatSeconds)
                 .setFetchWaitSeconds(fetchWaitSeconds)
                 .setSdkType(sdkType)
-                .setTag(tag);
+                .setTag(tag)
+                .setAesKey(aesKey);
         if (workerInstanceId != null && !workerInstanceId.isEmpty()) {
             config.setAddress(workerInstanceId);
         }

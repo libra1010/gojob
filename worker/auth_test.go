@@ -3,13 +3,16 @@
 package worker
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	v2 "encoding/json/v2"
 
@@ -185,5 +188,63 @@ func TestRunFailsFastWithoutRegistration(t *testing.T) {
 	err := w.Run(t.Context())
 	if err == nil || !strings.Contains(err.Error(), "register") {
 		t.Fatalf("Run err = %v, want 注册失败", err)
+	}
+}
+
+// 冷启动撞上"服务端还没起来 / accept 队列被打满"：连不上要退避重试，不能就此永久缺席。
+// 这条是 200 节点实机压出来的：本机 kern.ipc.somaxconn=128，200 个节点同时注册时
+// 稳定有 6~23 个在 /worker/register 上吃到 connection reset，旧行为是这些节点直接退出。
+func TestStartupRegisterRetriesUntilServerAppears(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	if err := ln.Close(); err != nil { // 先占号再释放：前几次注册必然 connection refused
+		t.Fatal(err)
+	}
+
+	f := &fakeServer{t: t, plain: "pw1"}
+	srv := httptest.NewUnstartedServer(f)
+	go func() {
+		time.Sleep(500 * time.Millisecond) // 留出至少一次"连不上"
+		l, e := net.Listen("tcp", addr)
+		if e != nil {
+			t.Errorf("稍后补起的监听失败: %v", e)
+			return
+		}
+		srv.Listener = l
+		srv.Start()
+	}()
+	defer srv.Close()
+
+	w := newTestWorker("http://" + addr)
+	if err := w.registerAtStartup(t.Context()); err != nil {
+		t.Fatalf("服务端补起后注册应当成功, got %v", err)
+	}
+	if n := f.registerCount(); n != 1 {
+		t.Fatalf("成功注册次数 = %d, want 1（成功即止，不该再重试一轮）", n)
+	}
+}
+
+// 与之相对：服务端明确答了"不行"（口令错、要求加密、没配 key）时不许重试——
+// 重试不会让配置变对，只会把配置故障伪装成网络故障，拖住启动。
+func TestStartupRegisterDoesNotRetryRejection(t *testing.T) {
+	f := &fakeServer{t: t, plain: "never-matches"}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	w := newTestWorker(srv.URL)
+
+	start := time.Now()
+	err := w.registerAtStartup(t.Context())
+	if err == nil {
+		t.Fatal("口令不对时注册应失败")
+	}
+	var se *serverError
+	if !errors.As(err, &se) {
+		t.Fatalf("err = %v, want 服务端业务错误（不该被当成连不上）", err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("业务拒绝被重试了（耗时 %v）", d)
 	}
 }

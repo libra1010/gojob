@@ -97,13 +97,13 @@ func TestInlineScriptRunsWhenAllowed(t *testing.T) {
 	if got := readMark(t, mark); got != "inline" {
 		t.Fatalf("mark=%q", got)
 	}
-	// 路径与命名沿用 PowerJob：{workspace}/official_script_processor/shell_{instanceId}.sh
+	// 路径与命名沿用兼容协议：{workspace}/official_script_processor/shell_{instanceId}.sh
 	if _, err := os.Stat(filepath.Join(ws, scriptDirName, "shell_3.sh")); err != nil {
 		t.Fatalf("脚本文件位置不对：%v", err)
 	}
 }
 
-// PowerJob 的 prepareScriptFile 遇到同名文件直接复用，改过的脚本会静默按旧内容再跑；
+// 兼容协议的 prepareScriptFile 遇到同名文件直接复用，改过的脚本会静默按旧内容再跑；
 // 这里有意每次覆盖写入，这个用例钉住这个差异。
 func TestInlineScriptIsRewrittenNotReused(t *testing.T) {
 	mark := markPath(t)

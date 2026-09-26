@@ -1,0 +1,46 @@
+# gojob 镜像的**国内镜像版**：与 Dockerfile 只差两个来源，其余（target、构建参数、
+# 产物布局、USER/EXPOSE/ENTRYPOINT）逐行一致。
+#
+#   docker build -f Dockerfile.cn --build-arg BUILD_TARGET=gojob-server -t gojob/gojob-server:latest .
+#   docker build -f Dockerfile.cn --build-arg BUILD_TARGET=gojob-demo   -t gojob/gojob-demo:latest .
+#   docker build -f Dockerfile.cn --build-arg BUILD_TARGET=gojob-agent  -t gojob/gojob-agent:latest .
+#
+# compose 里用：把 services 的 `build: .` 换成
+#   build: { context: ., dockerfile: Dockerfile.cn }
+#
+# 换掉的两处：
+#   1) 基础镜像走华为云 SWR 的搬运副本（docker.io 在部分网络下拉不动）；
+#   2) 构建期的模块代理走 goproxy.cn，否则 `go mod download` 会卡在 sum.golang.org /
+#      proxy.golang.org 上。校验库仍由 goproxy.cn 代理，**没有**关 GOSUMDB、也没有
+#      GOFLAGS=-insecure：关校验换来的速度不值得把依赖完整性一起丢掉。
+#
+# 两个基础镜像都开成了 ARG：搬运副本的 tag 由对方仓库决定，撞上"这个 tag 还没同步"时
+# 用 --build-arg 换一个就行，不必改文件。
+ARG GOLANG_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/golang:1.27.1-alpine
+ARG ALPINE_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/alpine:3.24.0
+
+FROM ${GOLANG_IMAGE} AS build
+# FROM 之前声明的 ARG 只对 FROM 行有效，进阶段要重新声明一遍。
+ARG BUILD_TARGET=gojob-server
+ARG GOJOB_VERSION=dev
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=${GOPROXY}
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+# 纯 Go 的 sqlite 驱动，不需要 CGO —— 与国内镜像无关，保持与 Dockerfile 一致。
+RUN CGO_ENABLED=0 go build -trimpath \
+      -ldflags="-s -w -X main.version=${GOJOB_VERSION}" \
+      -o /out/app ./cmd/${BUILD_TARGET}
+
+FROM ${ALPINE_IMAGE}
+ARG BUILD_TARGET=gojob-server
+RUN adduser -D -u 10001 gojob
+WORKDIR /app
+COPY --from=build /out/app /app/${BUILD_TARGET}
+USER gojob
+EXPOSE 7700 7799 7800
+# 与 Dockerfile 同一条决定：镜像里刻意不写 HEALTHCHECK（三个 target 端口不同，写了会让
+# demo/agent 容器恒为 unhealthy）。健康检查归编排层管，见 docker-compose.yml。
+ENTRYPOINT ["/app/${BUILD_TARGET}"]

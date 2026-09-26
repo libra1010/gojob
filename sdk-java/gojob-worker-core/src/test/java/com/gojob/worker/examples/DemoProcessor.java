@@ -7,7 +7,7 @@ import com.gojob.worker.TaskContext;
 /**
  * 类全名方式接入的处理器示例。
  *
- * <p>Server 端 Job 的 processor 字段（或 PowerJob 导入的 processorInfo）填
+ * <p>Server 端 Job 的 processor 字段（或兼容协议导入的 processorInfo）填
  * {@code com.gojob.worker.examples.DemoProcessor}，SDK 会 Class.forName + 无参构造
  * 实例化并缓存复用，因此实现类必须保持无状态（提供的实例为进程内单例）。
  */

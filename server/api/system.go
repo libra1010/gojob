@@ -1,5 +1,5 @@
 // 节点监控接口：跨副本的调度中心进程指标 + 在线 worker 的 runtime 指标。
-// PowerJob 控制台没有这一页（它只有首页时间卡与 worker 机器表），属本项目增强项。
+// 兼容协议控制台没有这一页（它只有首页时间卡与 worker 机器表），属本项目增强项。
 package api
 
 import (

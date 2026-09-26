@@ -18,7 +18,7 @@ import (
 
 // ---------- App（项目）管理 ----------
 
-// appView 项目行 + 当前调度归属副本，对齐 PowerJob 应用列表里的 currentServer 列。
+// appView 项目行 + 当前调度归属副本，列名沿用兼容协议应用列表的 currentServer。
 // current_server 为空 = 此刻没有活着的副本持有该项目的租约（新项目待认领，或持有者刚掉线）。
 type appView struct {
 	store.AppInfo
@@ -133,7 +133,7 @@ func (s *Server) listWorkers(c *gin.Context) {
 
 // ---------- Job 修改 / 删除 ----------
 
-// dispatchStrategyOrDefault 校验分发策略取值；0 表示未指定，按 PowerJob 语义回落健康优先。
+// dispatchStrategyOrDefault 校验分发策略取值；0 表示未指定，按兼容协议语义回落健康优先。
 func dispatchStrategyOrDefault(v int) (int, error) {
 	switch v {
 	case 0:

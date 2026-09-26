@@ -26,7 +26,10 @@ import (
 const (
 	PurposeConsole = "console" // 控制台用户
 	PurposeWorker  = "worker"  // worker 数据面，绑定 app_id + instance_id
-	PurposeOpenAPI = "openapi" // PowerJob 兼容层 authApp 换的票
+	PurposeOpenAPI = "openapi" // 兼容层 authApp 换的票
+	// PurposeChallenge 一次性注册 challenge：签名、30s 过期、消费一次即废（见 registercipher.go）。
+	// 单列一个用途，控制台会话票与 worker 票都不能拿去当 challenge 用，反之亦然。
+	PurposeChallenge = "challenge"
 )
 
 // RenewedHeader 会话续期响应头：前端拦截器发现该头就替换本地存的票。

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # gojob-agent（零代码执行节点）实机验收：自己起 1 个 server + 1 个 agent + 1 个普通 demo worker，
 # 逐项验证"脚本任务"这条链真的通、而且安全默认值真的在承重：
-#   ① 脚本库里的预置脚本能执行，短名 shell 与 PowerJob 官方类全名等价，参数能传进脚本；
+#   ① 脚本库里的预置脚本能执行，短名 shell 与兼容协议官方类全名等价，参数能传进脚本；
 #   ② 默认拒绝"任务参数即脚本文本"，错误信息直接点名 GOJOB_AGENT_ALLOW_INLINE_SCRIPTS；
 #   ③ 脚本 stdout/stderr 逐行进任务日志；非 0 退出码判失败并在结果里带 stderr 尾巴；
 #   ④ SPECIFY + tagEquals:executor 把脚本任务只派给 agent（普通 worker 一次都收不到）；
 #   ⑤ processorType=EXTERNAL 被 worker 明确拒绝，而不是含糊的"找不到处理器"；
 #   ⑥ 停止实例会把脚本连同它自己起的后台子进程一起收走（不留孤儿）；
 #   ⑦ 显式开 GOJOB_AGENT_ALLOW_INLINE_SCRIPTS 后，同一条内联任务立刻能跑；
-#   ⑧ 老式 PowerJob SHELL 任务导入后被改写成 BUILT_IN + 官方脚本处理器并真的跑通；
+#   ⑧ 老式兼容协议的 SHELL 任务导入后被改写成 BUILT_IN + 官方脚本处理器并真的跑通；
 #   ⑨ PYTHON / EXTERNAL 的导入逐条给出可操作原因（不留静默哑弹）。
 #
 # 口令与 worker 票那条边界由 scripts/verify-worker-token.sh 负责，这里不重复。
@@ -234,9 +234,9 @@ contains "脚本 stderr 也进了在线日志" "一行标准错误" "$(logs_of "
 FQ='tech.powerjob.official.processors.impl.script.ShellProcessor'
 mkjob lib-fq "$FQ" "ok.sh fqcn" "$TAGGED" >/dev/null
 I2=$(run lib-fq)
-want_status "PowerJob 官方类全名与短名走同一个处理器" SUCCEED "$I2"
+want_status "官方类全名与短名走同一个处理器" SUCCEED "$I2"
 contains "类全名任务的参数同样传进去了" "参数=fqcn" "$(logs_of "$I2")"
-ok "同一份任务配置在 PowerJob 与 gojob 两边写法一致（processorInfo=类全名 + 脚本放任务参数）"
+ok "同一份任务配置在两边写法一致（processorInfo=类全名 + 脚本放任务参数）"
 
 echo
 echo "== 3. 默认不执行任务参数里直接给的脚本文本"
@@ -338,7 +338,7 @@ want_status "内联脚本在显式授权后执行成功" SUCCEED "$(run inline-d
 contains "开开关时 agent 打了醒目告警日志" "任何能建任务" "$(cat "$AGENT_LOG")"
 
 echo
-echo "== 9. 导入与 OpenAPI 建单对 PowerJob 处理器类型的处理"
+echo "== 9. 导入与 OpenAPI 建单对处理器类型的处理"
 IMPORT=$(printf '{"app_id":"%s","jobs":[{"jobName":"legacy-shell","timeExpressionType":"API","processorType":"SHELL","processorInfo":"echo 旧 SHELL 任务的脚本正文","executeType":"STANDALONE","dispatchStrategy":11,"dispatchStrategyConfig":"tagEquals:executor"},{"jobName":"legacy-python","timeExpressionType":"API","processorType":"PYTHON","processorInfo":"print(1)","executeType":"STANDALONE"},{"jobName":"legacy-external","timeExpressionType":"API","processorType":"EXTERNAL","processorInfo":"1#com.x.Foo","executeType":"STANDALONE"}]}' "$APP")
 RESP=$(api "$BASE" /openapi/job/import -H 'Content-Type: application/json' -d "$IMPORT")
 item() { printf '%s' "$RESP" | python3 -c "

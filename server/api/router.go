@@ -28,24 +28,26 @@ import (
 )
 
 type Server struct {
-	st        *store.Store
-	reg       *registry.Registry
-	disp      *dispatch.Dispatcher
-	sched     *scheduler.Scheduler
-	am        *auth.Manager
-	wtk       *auth.WorkerTokens
-	pj        *auth.OpenAPITokens
+	st    *store.Store
+	reg   *registry.Registry
+	disp  *dispatch.Dispatcher
+	sched *scheduler.Scheduler
+	am    *auth.Manager
+	wtk   *auth.WorkerTokens
+	pj    *auth.OpenAPITokens
+	// rcrypto 注册口令加密（一次性 challenge + AES-GCM）；nil = 未启用，注册走明文。
+	rcrypto   *auth.RegisterCrypto
 	leases    *cluster.Leases // 本副本的调度归属账本，供控制台展示"谁在调度哪个项目"
 	dbDriver  string
 	publicURL string
 }
 
 // New as 是本进程的一整套令牌体系（见 auth.Set）：控制台会话、worker 数据面、
-// PowerJob OpenAPI 三种票由同一个集群密钥签发，因此多副本只要密钥一致就互认。
+// OpenAPI 兼容层的三种票由同一个集群密钥签发，因此多副本只要密钥一致就互认。
 func New(st *store.Store, reg *registry.Registry, disp *dispatch.Dispatcher, sched *scheduler.Scheduler,
 	as *auth.Set, leases *cluster.Leases, dbDriver, publicURL string) *Server {
 	return &Server{st: st, reg: reg, disp: disp, sched: sched, leases: leases,
-		am: as.Console, wtk: as.Worker, pj: as.OpenAPI,
+		am: as.Console, wtk: as.Worker, pj: as.OpenAPI, rcrypto: as.Register,
 		dbDriver: dbDriver, publicURL: publicURL}
 }
 
@@ -99,7 +101,7 @@ func (s *Server) Router(mid ...gin.HandlerFunc) *gin.Engine {
 		admin.POST("/job/delete", s.deleteJob)
 		admin.GET("/job/get", s.getJob)
 		admin.GET("/job/list", s.listJobs)
-		admin.GET("/job/export", s.exportJob)
+		admin.GET("/job/export", s.exportJobs)
 		admin.POST("/job/operate", s.operateJob)
 		admin.POST("/job/import", s.importJobs)
 		admin.GET("/job/previewTime", s.previewTime)
@@ -116,7 +118,8 @@ func (s *Server) Router(mid ...gin.HandlerFunc) *gin.Engine {
 
 	w := r.Group("/worker")
 	{
-		w.POST("/register", s.workerRegister) // 唯一需要项目口令的数据面入口
+		w.POST("/register", s.workerRegister)   // 唯一需要项目口令的数据面入口
+		w.POST("/challenge", s.workerChallenge) // 加密注册握手第一步：领一次性 challenge
 		w.POST("/heartbeat", s.heartbeat)
 		w.POST("/fetchTask", s.fetchTask)
 		w.POST("/report", s.report)
@@ -125,8 +128,8 @@ func (s *Server) Router(mid ...gin.HandlerFunc) *gin.Engine {
 		w.POST("/reportLogs", s.reportLogs)
 	}
 
-	// PowerJob 4.x 客户端兼容层（/openApi，注意大小写与 /openapi 不冲突）
-	s.registerPowerJobOpenAPI(r)
+	// OpenAPI 兼容层（/openApi，注意大小写与 /openapi 不冲突）
+	s.registerOpenAPICompat(r)
 	return r
 }
 
@@ -313,7 +316,7 @@ func (s *Server) getJob(c *gin.Context) {
 	writeOK(c, job)
 }
 
-// listJobs 任务列表：语义对齐 PowerJob 会话接口 `/job/list`（index 从 0 起、jobId 精确、
+// listJobs 任务列表：语义沿用兼容协议的会话接口 `/job/list`（index 从 0 起、jobId 精确、
 // keyword 模糊匹配任务名/描述、返回 PageResult）。
 // page_size<=0 表示不分页（返回全量、total_pages=1）——控制台建单抽屉里的「上游任务」下拉
 // 要的是全项目候选，不能被分页切成几页。
@@ -397,7 +400,7 @@ func (s *Server) operateJob(c *gin.Context) {
 		err = s.st.Updates[store.JobInfo](job.ID, map[string]any{"enable": true, "next_trigger_time": next})
 		s.sched.Reschedule(job.ID)
 	case "trigger":
-		// 带 instance_params 就是 PowerJob 的 runJob 语义（控制台「参数运行」），
+		// 带 instance_params 就是兼容协议的 runJob 语义（控制台「参数运行」），
 		// 只影响这一次运行，不改任务里配的默认实例参数。
 		if req.InstanceParams != "" {
 			_, err = s.sched.TriggerRun(job, req.InstanceParams)
@@ -473,7 +476,17 @@ func (s *Server) workerRegister(c *gin.Context) {
 		writeErr(c, protocol.CodeBadReq, "bad request: app_id and instance_id required")
 		return
 	}
-	if err := s.auth(req.AppId, req.Password); err != nil {
+	// 口令可能以两种方式上来（明文 / challenge+AES-GCM），先还原再校验，
+	// 后面的 bcrypt 比对与日志与引入加密前完全一样。
+	out := s.clearRegister(req.AppId, req.InstanceId, auth.Clear{
+		Scheme: req.AuthScheme, Kid: req.Kid, Iv: req.Iv,
+		Ciphertext: req.Ciphertext, Challenge: req.Challenge, Password: req.Password,
+	})
+	if out.Err != nil || !out.OK {
+		s.writeClearReject(c, out)
+		return
+	}
+	if err := s.auth(req.AppId, out.Password); err != nil {
 		writeErr(c, protocol.CodeAuthErr, "register rejected: "+err.Error())
 		return
 	}
@@ -515,7 +528,7 @@ func (s *Server) heartbeat(c *gin.Context) {
 	}
 	// 心跳是停止指令的兜底通道（长轮询已断或 worker 满载时仍能收到），
 	// 同时是集群路由提示的下发通道：worker 每 5s 一次心跳，搭车下发就等于零额外 QPS，
-	// 不需要 PowerJob 那种每 10s 一次的 /server/acquire 专用端点。
+	// 不需要兼容协议那种每 10s 一次的 /server/acquire 专用端点。
 	writeOK(c, protocol.HeartbeatResp{
 		CancelTasks: protocol.CancelTasks{CancelTaskIds: s.disp.PendingCancels(req.InstanceId)},
 		Cluster:     s.clusterHint(req.AppId),

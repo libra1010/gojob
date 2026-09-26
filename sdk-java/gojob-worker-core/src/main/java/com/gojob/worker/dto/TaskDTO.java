@@ -17,13 +17,13 @@ public class TaskDTO {
     @JsonProperty("app_id")
     public String appId;
 
-    /** SDK 内注册名 或 Java 类全名（PowerJob 导入的 processorInfo）。 */
+    /** SDK 内注册名 或 Java 类全名（兼容协议导入的 processorInfo）。 */
     @JsonProperty("processor")
     public String processor;
 
     /**
-     * 处理器类型（PowerJob ProcessorType）：BUILT_IN | EXTERNAL，空按 BUILT_IN。
-     * EXTERNAL 是 PowerJob 的 JAR 动态容器（容器ID#类名），本 SDK 会直接判失败。
+     * 处理器类型（兼容协议 ProcessorType）：BUILT_IN | EXTERNAL，空按 BUILT_IN。
+     * EXTERNAL 是兼容协议的 JAR 动态容器（容器ID#类名），本 SDK 会直接判失败。
      */
     @JsonProperty("processor_type")
     public String processorType;
@@ -33,7 +33,7 @@ public class TaskDTO {
     public String jobParams;
 
     /**
-     * 执行类型（PowerJob ExecuteType）：STANDALONE|BROADCAST|MAP|MAP_REDUCE。
+     * 执行类型（兼容协议 ExecuteType）：STANDALONE|BROADCAST|MAP|MAP_REDUCE。
      * worker 据此判断当前任务能不能派生子任务。
      */
     @JsonProperty("execute_type")
@@ -51,7 +51,7 @@ public class TaskDTO {
     @JsonProperty("sub_task_content")
     public String subTaskContent;
 
-    /** runJob 触发的动态参数（PowerJob 语义的 instanceParams），可能为空。 */
+    /** runJob 触发的动态参数（兼容协议语义的 instanceParams），可能为空。 */
     @JsonProperty("fixed_params")
     public String fixedParams;
 

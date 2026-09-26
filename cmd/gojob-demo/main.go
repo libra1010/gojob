@@ -76,6 +76,7 @@ func main() {
 	password := flag.String("password", "demo123", "app password")
 	drainAddr := flag.String("drain-addr", ":7799", "local admin endpoint for graceful offline")
 	tag := flag.String("tag", "", "worker tag，供 SPECIFY 分发策略匹配（tagIn/tagEquals）")
+	aesKey := flag.String("aes-key", "", "注册口令加密 key（64 位 hex），须与服务端 GOJOB_WORKER_AES_KEYS 之一一致；留空=口令明文送上来")
 	flag.Parse()
 
 	envOverride("GOJOB_WORKER_SERVER", server)
@@ -83,6 +84,7 @@ func main() {
 	envOverride("GOJOB_WORKER_PASSWORD", password)
 	envOverride("GOJOB_WORKER_DRAIN_ADDR", drainAddr)
 	envOverride("GOJOB_WORKER_TAG", tag)
+	envOverride("GOJOB_WORKER_AES_KEY", aesKey)
 
 	worker.Register("hello", helloProcessor{})
 	worker.Register("slow", slowProcessor{})
@@ -97,6 +99,7 @@ func main() {
 		AppId:           *appId,
 		Password:        *password,
 		Tag:             *tag,
+		AesKey:          *aesKey,
 	})
 
 	mux := http.NewServeMux()

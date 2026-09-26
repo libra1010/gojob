@@ -22,11 +22,11 @@ func TestParseTaskQuery(t *testing.T) {
 		wantErr bool
 	}{
 		{"空=不过滤", "", "", "", "id asc", false},
-		// 排序列必须是**真实列名**：控制台照搬 PowerJob 的默认那句用的是响应字段名
+		// 排序列必须是**真实列名**：控制台沿用兼容协议的默认那句，用的是响应字段名
 		// （last_modified_time），库里叫 modify_time。这一条以前按输入名断言，单测全绿而
 		// 实机一开详情弹窗就报 no such column——排序列的映射只有真查库才暴露，所以
 		// TestDetailPlusReturnsTree 里也照样查一次。
-		{"PowerJob 默认那句（排序列映射到真实列）", "status in (5, 6) order by last_modified_time desc",
+		{"兼容协议的默认那句（排序列映射到真实列）", "status in (5, 6) order by last_modified_time desc",
 			"status IN ?", "[FAILED SUCCEED]", "modify_time desc", false},
 		{"created_time 映射到 create_time", "order by created_time desc", "", "", "create_time desc", false},
 		{"单个等值", "status = 6", "status = ?", "SUCCEED", "id asc", false},
@@ -146,7 +146,7 @@ func TestDetailPlusReturnsTree(t *testing.T) {
 		t.Fatalf("子任务行字段不完整：%v", first)
 	}
 
-	// 过滤：只看失败的（PowerJob 序号 5）
+	// 过滤：只看失败的（兼容协议序号 5）
 	r = e.post(t, "/openapi/instance/detailPlus", tk, body(map[string]any{
 		"instance_id": inst.ID, "custom_query": "status = 5"}))
 	if r.Code != 0 {
@@ -159,7 +159,7 @@ func TestDetailPlusReturnsTree(t *testing.T) {
 		t.Fatalf("total = %v, want 0", r.Data["total"])
 	}
 
-	// 控制台默认填的那句原样打进来必须能查：PowerJob 的详情弹窗一打开就是这句话，
+	// 控制台默认填的那句原样打进来必须能查：兼容协议的详情弹窗一打开就是这句话，
 	// 排序列名只要对不上真实列，用户看到的就是一个报错的空表格（实机验收踩过一次）。
 	r = e.post(t, "/openapi/instance/detailPlus", tk, body(map[string]any{
 		"instance_id":  inst.ID,

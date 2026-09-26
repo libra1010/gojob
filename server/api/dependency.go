@@ -1,4 +1,4 @@
-// 依赖触发（gojob 扩展，PowerJob 用工作流 DAG 表达任务依赖，这里简化为"单上游、成功即触发"）：
+// 依赖触发（gojob 扩展，兼容协议用工作流 DAG 表达任务依赖，这里简化为"单上游、成功即触发"）：
 // 下游任务记录 upstream_job_id，上游实例成功收尾时由 Dispatcher 回调 Scheduler.TriggerDependency。
 // 本文件只负责保存期的校验：触发关系必须在写入前确认无环，否则运行期会互相拉起无限实例。
 package api

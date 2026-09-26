@@ -6,11 +6,11 @@ import type {
   JobInfo,
   ModifyJobReq,
   PageResult,
-  PowerJobJob,
+  JobDTO,
 } from './types'
 
 /**
- * 任务列表：index 从 0 起（对齐 PowerJob 会话接口的分页语义）。
+ * 任务列表：index 从 0 起（与兼容协议会话接口的分页语义一致）。
  * pageSize<=0 表示不分页、一次给全量（建单抽屉里选「上游任务」要的是全项目候选）。
  */
 export function listJobs(
@@ -35,9 +35,20 @@ export function listAllJobs(appId: string) {
   return listJobs(appId, { pageSize: 0 }).then((p) => p.data ?? [])
 }
 
-/** PowerJob 导出格式（camelCase JobDTO），可直接粘回导入框再导回来 */
+/** 单个任务导出：后端返回一个对象 */
 export function exportJob(jobId: number) {
-  return request<PowerJobJob>(http.get('/job/export', { params: { job_id: jobId } }))
+  return request<JobDTO>(http.get('/job/export', { params: { job_id: jobId } }))
+}
+
+/** 批量导出：任务 ID 列表 / 整个项目，后端一律返回数组 */
+export function exportJobs(jobIds: number[]) {
+  return request<JobDTO[]>(
+    http.get('/job/export', { params: { job_ids: jobIds.join(',') } }),
+  )
+}
+
+export function exportAppJobs(appId: string) {
+  return request<JobDTO[]>(http.get('/job/export', { params: { app_id: appId } }))
 }
 
 export function getJob(jobId: number) {
@@ -55,7 +66,7 @@ export function modifyJob(req: ModifyJobReq) {
 
 /**
  * trigger 时若任务执行中且开启 skip_when_running，返回 409。
- * instanceParams 非空即 PowerJob 的「参数运行」：只影响这一次运行，不改任务里配的默认值。
+ * instanceParams 非空即「参数运行」（兼容协议同名语义）：只影响这一次运行，不改任务里配的默认值。
  */
 export function operateJob(jobId: number, action: JobAction, instanceParams?: string) {
   return request<Record<string, never>>(
@@ -67,8 +78,8 @@ export function deleteJob(jobId: number) {
   return request<Record<string, never>>(http.post('/job/delete', { job_id: jobId }))
 }
 
-/** PowerJob 控制台导出格式（camelCase 数组）逐条导入 */
-export function importJobs(appId: string, jobs: PowerJobJob[]) {
+/** 通用任务包格式（camelCase 数组）逐条导入 */
+export function importJobs(appId: string, jobs: JobDTO[]) {
   return request<ImportJobsResp>(http.post('/job/import', { app_id: appId, jobs }))
 }
 

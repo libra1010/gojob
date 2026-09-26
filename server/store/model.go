@@ -9,13 +9,13 @@ type AppInfo struct {
 	TokenEpoch int64     `json:"token_epoch"`
 	AppId      string    `gorm:"uniqueIndex;size:64" json:"app_id"`
 	AppName    string    `gorm:"size:128" json:"app_name"`
-	Password   string    `gorm:"size:128" json:"-"` // bcrypt(明文)：worker 数据面、控制台与 PowerJob authApp 校验
+	Password   string    `gorm:"size:128" json:"-"` // bcrypt(明文)：worker 数据面、控制台与兼容协议的 authApp 都要校验它
 	CreateTime time.Time `json:"create_time"`
 	ModifyTime time.Time `json:"modify_time"`
 }
 
 // AppLease 项目级的调度归属租约：同一时刻只有一个 Server 副本能调度某个 app 的任务，
-// 这就是集群下"一个 job 一次触发只生成一个实例"的结构性保证（对齐 PowerJob 的
+// 这就是集群下"一个 job 一次触发只生成一个实例"的结构性保证（沿用兼容协议的
 // app_info.current_server 归属模型，区别是我们用租约 TTL 判活，而不是它靠 worker 心跳反向 PING）。
 //
 // Epoch 只在**接管**时递增（续约不动），配合 holder 构成 fencing：
@@ -61,8 +61,13 @@ type WorkerNode struct {
 	ModifyTime    time.Time `json:"modify_time"`
 }
 
-// TokenRevoked 单票黑名单：只服务于"主动退出登录"——无状态令牌无法凭内存删掉一张票，
-// 而退出又必须真的生效。行随令牌一起过期，由后台维护循环清理。
+// TokenRevoked 已消费的 jti：两类用途共用这一张表，语义是"这个 jti 用过了"。
+//   - 登出：无状态令牌无法凭内存作废单张票，而退出又必须真的生效；
+//   - 一次性注册 challenge：主键冲突 = 这张票已被用过，于是"只用一次"跨副本成立
+//     （见 auth.Challenges.Redeemed）。真插入失败（查库报错）时按"没用过"返回错误，
+//     宁可不放行，也不能让同一张 challenge 用两次。
+//
+// 行随对应令牌一起过期，由后台维护循环清理。
 type TokenRevoked struct {
 	Jti      string    `gorm:"primaryKey;size:64" json:"jti"`
 	Purpose  string    `gorm:"size:16" json:"purpose"`
@@ -122,7 +127,7 @@ type JobInfo struct {
 	JobName            string `gorm:"size:128" json:"job_name"`
 	JobDescription     string `gorm:"size:256" json:"job_description"`
 	Processor          string `gorm:"size:128" json:"processor"`
-	ProcessorType      string `gorm:"size:32;default:'BUILT_IN'" json:"processor_type"`   // PowerJob ProcessorType：BUILT_IN / EXTERNAL（SHELL/PYTHON 导入时已改写）
+	ProcessorType      string `gorm:"size:32;default:'BUILT_IN'" json:"processor_type"`   // 兼容协议的 ProcessorType 枚举：BUILT_IN / EXTERNAL（SHELL/PYTHON 导入时已改写）
 	ExecuteType        string `gorm:"size:16;default:'STANDALONE'" json:"execute_type"`   // 一期仅 STANDALONE 生效
 	TimeExpressionType string `gorm:"size:24;default:'CRON'" json:"time_expression_type"` // CRON / FIXED_RATE / API
 	TimeExpression     string `gorm:"size:64" json:"time_expression"`
@@ -140,7 +145,7 @@ type JobInfo struct {
 	MaxWorkerCount         int       `gorm:"default:0" json:"max_worker_count"`        // 0=不限
 	DispatchStrategy       int       `gorm:"default:1" json:"dispatch_strategy"`       // 1健康优先(默认) 2随机 11指定 21轮询(扩展)
 	DispatchStrategyConfig string    `gorm:"size:255" json:"dispatch_strategy_config"` // 仅 SPECIFY 使用
-	UpstreamJobId          uint64    `gorm:"index;default:0" json:"upstream_job_id"`   // 依赖触发：上游任务 ID，0=无上游（PowerJob 用工作流表达，此为 gojob 扩展）
+	UpstreamJobId          uint64    `gorm:"index;default:0" json:"upstream_job_id"`   // 依赖触发：上游任务 ID，0=无上游（兼容协议用工作流表达依赖，此为 gojob 扩展）
 	LogLevel               string    `gorm:"size:8;default:'INFO'" json:"log_level"`
 	Enable                 bool      `gorm:"index:idx_app_enable;default:true" json:"enable"`
 	NextTriggerTime        time.Time `gorm:"index" json:"next_trigger_time"`
@@ -207,7 +212,7 @@ type JobInstance struct {
 	// 以及收敛时按 MAP（任一子任务失败即失败）还是 MAP_REDUCE（reduce 的返回值说了算）。
 	// 抄而不 JOIN：任务改过执行类型不该追溯已产生的实例。
 	ExecuteType string `gorm:"size:16;default:'STANDALONE'" json:"execute_type"`
-	// Result 实例级结果，对齐 PowerJob InstanceInfoDO.result：非 MAP_REDUCE 取根任务的返回值，
+	// Result 实例级结果，与兼容协议的 InstanceInfoDO.result 同义：非 MAP_REDUCE 取根任务的返回值，
 	// MAP_REDUCE 取 reduce 任务（OMS_LAST_TASK）的返回值。
 	Result        string    `gorm:"type:text" json:"result"`
 	FixedParams   string    `gorm:"type:text" json:"fixed_params"`  // 工作流上下文，M5 使用
@@ -234,7 +239,7 @@ type InstanceTask struct {
 	WorkerId       string `gorm:"size:64" json:"worker_id"`        // 认领该任务 worker instance_id
 	TargetWorkerId string `gorm:"size:64" json:"target_worker_id"` // 分发策略预选的机器，空=任意在线节点可认领
 	// —— 多任务执行类型（BROADCAST/MAP/MAP_REDUCE）：一个实例是一棵树，根任务 parent_task_id=0 ——
-	// PowerJob 把这些行放在 TaskTracker 节点的本地 task_info 表里、server 零落库；gojob 是 pull
+	// 兼容协议把这些行放在 TaskTracker 节点的本地 task_info 表里、server 零落库；gojob 是 pull
 	// 模型且 worker 之间不通信，子任务只能经 server 中转落库。附带好处：实例结束后子任务仍可查。
 	ParentTaskId uint64 `gorm:"index:idx_task_parent_state,priority:1;default:0" json:"parent_task_id"`
 	// MapBatch/MapAttempt 一起构成派生幂等键：(父任务, 第几次尝试, 第几批 map)。
@@ -245,7 +250,7 @@ type InstanceTask struct {
 	ExecuteType string `gorm:"size:16;default:'STANDALONE'" json:"execute_type"`
 	TaskKey     string `gorm:"size:64" json:"task_key"`   // 层次 ID："0" / "0.3" / reduce 固定 "9999"
 	TaskName    string `gorm:"size:256" json:"task_name"` // map() 的第二参；内部任务用 OMS_* 保留名
-	// SubTaskContent 子任务负载。PowerJob 用 worker 侧可插拔序列化器（默认 JDK 序列化），
+	// SubTaskContent 子任务负载。兼容协议用 worker 侧可插拔序列化器（默认 JDK 序列化），
 	// gojob 固定 JSON：我们的 worker 池是 Go/Java 混布的，JDK 序列化的字节 Go 侧读不了。
 	SubTaskContent  string     `gorm:"type:text" json:"sub_task_content"`
 	StopRequestTime *time.Time `json:"stop_request_time"` // 停止意图，NULL=未请求；落库所以 server 重启不丢指令

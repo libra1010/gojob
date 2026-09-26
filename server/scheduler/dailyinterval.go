@@ -9,8 +9,8 @@ import (
 	v2 "encoding/json/v2"
 )
 
-// 每日固定间隔（DAILY_TIME_INTERVAL），表达式与语义对齐 PowerJob
-// DailyTimeIntervalStrategyHandler.DailyTimeIntervalExpress：
+// 每日固定间隔（DAILY_TIME_INTERVAL），表达式与语义和兼容协议的
+// DailyTimeIntervalStrategyHandler.DailyTimeIntervalExpress 一致：
 //
 //	{"interval":10,"intervalUnit":"SECONDS","startTimeOfDay":"08:00:00","endTimeOfDay":"22:00:00","daysOfWeek":[1,2,3,4,5]}
 //
@@ -50,7 +50,7 @@ func parseDailyInterval(expr string) (intervalMs int64, start, end timeOfDay, da
 		return 0, start, end, nil, fmt.Errorf("daily_time_interval 终点(%s)不能早于起点(%s)", ep.EndTimeOfDay, ep.StartTimeOfDay)
 	}
 
-	// 单位缺省为秒，与 PowerJob Optional.ofNullable(intervalUnit).orElse(SECONDS) 一致
+	// 单位缺省为秒，与兼容协议 Optional.ofNullable(intervalUnit).orElse(SECONDS) 的行为一致
 	unit := strings.ToUpper(strings.TrimSpace(ep.IntervalUnit))
 	if unit == "" {
 		unit = "SECONDS"
@@ -79,7 +79,7 @@ func parseDailyInterval(expr string) (intervalMs int64, start, end timeOfDay, da
 	return intervalMs, start, end, days, nil
 }
 
-// parseTimeOfDay 接受 "HH:mm:ss" 或 "HH:mm"，对齐 Quartz/PowerJob TimeOfDay.from。
+// parseTimeOfDay 接受 "HH:mm:ss" 或 "HH:mm"，与 Quartz/兼容协议的 TimeOfDay.from 解析一致。
 func parseTimeOfDay(s string) (timeOfDay, error) {
 	parts := strings.Split(strings.TrimSpace(s), ":")
 	if len(parts) != 2 && len(parts) != 3 {
@@ -105,7 +105,7 @@ func parseTimeOfDay(s string) (timeOfDay, error) {
 
 func (t timeOfDay) before(o timeOfDay) bool { return t.h*3600+t.m*60+t.s < o.h*3600+o.m*60+o.s }
 
-// chineseWeekday 国内习惯：周一=1 … 周日=7（对齐 PowerJob TimeUtils.calculateWeek）。
+// chineseWeekday 国内习惯：周一=1 … 周日=7（与兼容协议 TimeUtils.calculateWeek 一致）。
 func chineseWeekday(t time.Time) int {
 	if w := int(t.Weekday()); w != 0 {
 		return w
@@ -113,7 +113,7 @@ func chineseWeekday(t time.Time) int {
 	return 7
 }
 
-// atTimeOfDay 把 t 的日期部分保留、时刻改写为 tod（毫秒清零，同 PowerJob simpleSetCalendar）。
+// atTimeOfDay 把 t 的日期部分保留、时刻改写为 tod（毫秒清零，同兼容协议的 simpleSetCalendar）。
 func atTimeOfDay(t time.Time, tod timeOfDay) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), tod.h, tod.m, tod.s, 0, t.Location())
 }
@@ -122,7 +122,7 @@ func startOfNextDay(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location()).AddDate(0, 0, 1)
 }
 
-// inDailyRange 移植 PowerJob calculateInRangeTime：返回 >=time 且落在有效日窗口内的最近时刻。
+// inDailyRange 移植兼容协议的 calculateInRangeTime：返回 >=time 且落在有效日窗口内的最近时刻。
 func inDailyRange(t time.Time, start, end timeOfDay, days map[int]bool) (time.Time, error) {
 	for i := 0; i < maxDailyProbeDays; i++ {
 		// 非激活日：跳到次日 00:00 重新判定

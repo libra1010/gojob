@@ -1,9 +1,9 @@
 <script setup lang="ts">
-// 实例详情弹窗：1:1 照搬 PowerJob 控制台 InstanceDetail.vue 的信息构成——
+// 实例详情弹窗：信息构成与兼容协议的 InstanceDetail.vue 1:1 对齐——
 // Task 统计、子任务表格（列名与顺序一致）、"select * from task_info where ___ limit 10"
 // 那个查询框，以及任务结果。
 //
-// 差别只有一处，而且是能力增强：PowerJob 的明细是 server 现场反向 ask TaskTracker 所在
+// 差别只有一处，而且是能力增强：兼容协议的明细是 server 现场反向 ask TaskTracker 所在
 // worker 查它的本地表，worker 一掉线或实例一结束就查不到了；gojob 的任务树在库里，
 // 所以任何时候打开这个弹窗都能看到当时的每一片。
 import { ref, watch } from 'vue'
@@ -14,7 +14,7 @@ import { formatTime, statusTagType } from '@/utils/format'
 const props = defineProps<{ modelValue: boolean; instanceId: number }>()
 const emit = defineEmits<{ 'update:modelValue': [boolean] }>()
 
-// PowerJob 的默认查询就是"只看已失败的"，连文案一起照抄
+// 默认查询就是"只看已失败的"（沿用兼容协议的口径与文案）
 const DEFAULT_QUERY = 'status in (5, 6) order by last_modified_time desc'
 const query = ref(DEFAULT_QUERY)
 const detail = ref<InstanceDetail | null>(null)
@@ -47,7 +47,7 @@ watch(
 const statsText = () => {
   const s = detail.value?.task_stats
   if (!s) return ''
-  // 与 PowerJob 一样把统计当一段 JSON 原文展示，排障时可以直接复制
+  // 统计按一段 JSON 原文展示（同兼容协议），排障时可以直接复制
   return JSON.stringify(s)
 }
 
@@ -106,7 +106,7 @@ const isInstanceFinal = () => {
       />
       <div class="hint">
         这一句不会原样进数据库：后端只认 status / task_name / parent_task_id 的等值与 IN
-        写法，加可选的 order by；条数固定 10。status 的数字按 PowerJob 的 TaskStatus 序号解释（5=失败、6=成功）。
+        写法，加可选的 order by；条数固定 10。status 的数字按任务状态序号解释（5=失败、6=成功）。
       </div>
 
       <el-table :data="detail?.tasks || []" size="small" stripe max-height="320" class="tasks">

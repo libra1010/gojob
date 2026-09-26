@@ -168,14 +168,34 @@ func (rv *Revoked) Add(c Claims) error {
 	}).Error
 }
 
-// Has 这张票是否被登出过。查库失败时按"没被登出"处理并记日志：
+// Spend 把一张票的 jti 当场消费掉：返回 true 表示"这次是第一次"。
+// 一次 INSERT + 主键冲突判定 = 跨副本原子的"一次性"凭证，所以一次性注册 challenge
+// 也走这张表（它的真实语义是"已消费的 jti"，登出与 challenge 共用；两者都随自身过期被 Purge 掉）。
+// 查库失败按"没消费成功"返回错误：宁可不放行，也不能让同一张 challenge 用两次。
+func (rv *Revoked) Spend(c Claims) (bool, error) {
+	if c.Jti == "" {
+		return false, nil
+	}
+	res := rv.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&store.TokenRevoked{
+		Jti: c.Jti, Purpose: c.Purpose, Subject: c.Subject,
+		ExpireAt: time.Unix(c.Expire, 0),
+	})
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// Has 这张票是否被登出过。按用途限定：这张表现在同时容纳"登出票"和"已消费的一次性
+// challenge"（见 Spend），不区分就可能让一次随机 jti 冲撞把某个正常会话误判成已登出。
+// 查库失败时按"没被登出"处理并记日志：
 // 拉黑只影响主动退出这一条路径，不该因为一次查询抖动把正常会话踢下线。
-func (rv *Revoked) Has(jti string) bool {
+func (rv *Revoked) Has(jti, purpose string) bool {
 	if jti == "" {
 		return false
 	}
 	var n int64
-	err := rv.db.Model(&store.TokenRevoked{}).Where("jti = ?", jti).Count(&n).Error
+	err := rv.db.Model(&store.TokenRevoked{}).Where("jti = ? AND purpose = ?", jti, purpose).Count(&n).Error
 	if err != nil {
 		log.Printf("revoked token lookup: %v", err)
 		return false

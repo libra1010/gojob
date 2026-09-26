@@ -74,7 +74,7 @@ printf '   仓库 %s · 标签 %s · 提交 %s · Go %s\n' "${REPO:-<无远端>}
 
 say "1. 校验"
 if [ "$SKIP_CHECKS" = 0 ]; then
-  UNFORMATTED=$("$GOFMT" -l cmd server worker internal cmd/gojob-server 2>/dev/null | sort -u || true)
+  UNFORMATTED=$("$GOFMT" -l cmd server worker internal scripts 2>/dev/null | sort -u || true)
   [ -z "$UNFORMATTED" ] || die "以下文件未 gofmt：$UNFORMATTED"
   "$GO" vet ./...
   "$GO" test -race -count=1 ./...
@@ -85,10 +85,12 @@ if [ "$SKIP_CHECKS" = 0 ]; then
     die "dashboard/node_modules 不存在：前端未经类型检查与构建就发布等于没验证（先 cd dashboard && pnpm install）"
   fi
   if command -v mvn >/dev/null 2>&1; then
-    (cd sdk-java && mvn -o -q test-compile)
-    printf '   Java SDK test-compile 通过\n'
+    # 刻意不加 -o：Java 侧现在有单测（注册加密的黄金向量要 junit）。首次跑需要能取到依赖，
+    # 只编译不跑测试等于把跨语言口径那条闸门关掉。
+    (cd sdk-java && mvn -q test)
+    printf '   Java SDK mvn test 通过（含注册加密跨语言黄金向量）\n'
   else
-    printf '   WARNING 找不到 mvn，Java SDK 未经编译校验\n'
+    printf '   WARNING 找不到 mvn，Java SDK 未经编译与测试校验\n'
   fi
 else
   printf '   已跳过（--skip-checks）\n'
@@ -151,6 +153,8 @@ else
     printf '     docker build --build-arg BUILD_TARGET=%s --build-arg GOJOB_VERSION=%s -t gojob/%s:%s -t gojob/%s:latest .\n' \
       "$bin" "$TAG" "$bin" "$TAG" "$bin"
   done
+  # 国内机器上 docker.io 拉不动时，加 -f Dockerfile.cn（SWR 基础镜像 + goproxy.cn），其余参数同上。
+  printf '   docker.io 拉不动的机器：上面每条命令加 -f Dockerfile.cn（基础镜像走华为云 SWR、模块代理走 goproxy.cn）\n'
 fi
 
 say "4. Release 说明"

@@ -15,12 +15,12 @@ type CreateJobReq struct {
 	JobName            string `json:"job_name"`
 	JobDescription     string `json:"job_description"`
 	Processor          string `json:"processor"`            // worker 侧注册的处理器名（Java SDK 用类全名）
-	ProcessorType      string `json:"processor_type"`       // PowerJob ProcessorType：BUILT_IN | EXTERNAL，默认 BUILT_IN
+	ProcessorType      string `json:"processor_type"`       // 兼容协议的 ProcessorType 枚举：BUILT_IN | EXTERNAL，默认 BUILT_IN
 	ExecuteType        string `json:"execute_type"`         // 一期仅 STANDALONE 真实生效（SHARDING/BROADCAST 保留字段）
 	TimeExpressionType string `json:"time_expression_type"` // CRON | FIXED_RATE | FIXED_DELAY | DAILY_TIME_INTERVAL | API
 	TimeExpression     string `json:"time_expression"`      // CRON=cron 表达式；FIXED_RATE/FIXED_DELAY=周期毫秒数；API 留空
 	JobParams          string `json:"job_params"`           // 处理器收到的静态参数（JSON 字符串）
-	InstanceParams     string `json:"instance_params"`      // 每次触发的默认运行时参数（PowerJob instanceParams 语义）
+	InstanceParams     string `json:"instance_params"`      // 每次触发的默认运行时参数（兼容协议的 instanceParams 语义）
 	// 这四个用指针：0 都是合法取值（不重试 / 不限实例数），值类型分不出"没传"和"传了 0"。
 	MaxRetryTimes          *int   `json:"max_retry_times"` // 任务级重试次数
 	InstanceRetryNum       *int   `json:"instance_retry_num"`
@@ -59,8 +59,8 @@ type ModifyJobReq struct {
 	LogLevel               *string `json:"log_level"`
 }
 
-// 分发策略，取值与 PowerJob DispatchStrategy 枚举一致。
-// 21（轮询）是 gojob 扩展：PowerJob 无 ROUND_ROBIN，其三种策略均无严格轮流语义。
+// 分发策略，取值与兼容协议的 DispatchStrategy 枚举同值同名。
+// 21（轮询）是 gojob 扩展：兼容协议里没有 ROUND_ROBIN，其三种策略均无严格轮流语义。
 const (
 	DispatchHealthFirst = 1  // 健康度优先（默认）
 	DispatchRandom      = 2  // 随机
@@ -75,7 +75,7 @@ type OperateJobReq struct {
 	InstanceParams string `json:"instance_params"`
 }
 
-// PageResult 列表接口的分页包装，语义对齐 PowerJob 会话接口 PageResult：
+// PageResult 列表接口的分页包装，与兼容协议的会话接口 PageResult 语义一致：
 // index 从 0 起；page_size<=0 表示不分页（一次给全，total_pages=1），供需要全量候选的下拉用。
 type PageResult[T any] struct {
 	Index      int   `json:"index"`
@@ -98,6 +98,10 @@ const (
 	CodeNotFound = 404
 	CodeConflict = 409
 	CodeErr      = 500
+	// CodeChallengeRequired "要加密，但你发了明文"：既不是拒绝也不是口令错，
+	// 而是"按 data 里的 challenge 重来一次"。故意不复用 401——SDK 把 401 当作
+	// "票过期了，去重新注册"，用它当握手信号会转成注册死循环。
+	CodeChallengeRequired = 428
 )
 
 // ---------- 数据面（Worker -> Server） ----------
@@ -132,6 +136,11 @@ type HeartbeatReq struct {
 
 // RegisterReq：worker 用项目口令换取数据面 token 的唯一入口。
 // 口令只在注册（以及过期后重新注册）时走一次，其余数据面请求只带 token。
+// RegisterReq 注册。口令有两种送法，由 auth_scheme 区分（见 server/auth/registercipher.go）：
+//   - ""/plain：口令直接放 password（服务端未配 AES key 时的唯一方式）；
+//   - aes-gcm ：password 留空，口令在 ciphertext 里，challenge 必须是刚领到且未用过的那张。
+//
+// 加密方式解决的只是"口令不上线 + 抓到的注册包不可重用"，链路本身仍是明文。
 type RegisterReq struct {
 	InstanceId string `json:"instance_id"`
 	AppId      string `json:"app_id"`
@@ -139,6 +148,27 @@ type RegisterReq struct {
 	Address    string `json:"address"`
 	Version    string `json:"version"`
 	SdkType    string `json:"sdk_type"`
+
+	AuthScheme string `json:"auth_scheme,omitempty"` // "" | plain | aes-gcm
+	Challenge  string `json:"challenge,omitempty"`   // 一次性凭证原文
+	Kid        string `json:"kid,omitempty"`         // 用哪把 key（key 自身指纹）
+	Iv         string `json:"iv,omitempty"`          // AES-GCM nonce，base64，12 字节
+	Ciphertext string `json:"ciphertext,omitempty"`  // base64，认证标签附在尾部（JCE 同约定）
+}
+
+// ChallengeReq 领一次性 challenge（加密握手第一步）。worker 侧两个字段都要；
+// OpenAPI 兼容层的 /openApi/challenge 用 appName，见 server/api/registercipher_api.go。
+type ChallengeReq struct {
+	InstanceId string `json:"instance_id"`
+	AppId      string `json:"app_id"`
+}
+
+// ChallengeResp 领一次性 challenge。schemes 让客户端"看得见"服务端接受什么方式，
+// 错配时报得出原因，而不是撞一个含混的 401。
+type ChallengeResp struct {
+	Challenge string   `json:"challenge"`
+	ExpiresIn int      `json:"expires_in"` // 秒
+	Schemes   []string `json:"schemes"`    // 例如 ["plain","aes-gcm"] 或只有 ["aes-gcm"]
 }
 
 type RegisterResp struct {
@@ -152,9 +182,9 @@ type CancelTasks struct {
 	CancelTaskIds []uint64 `json:"cancel_task_ids"`
 }
 
-// ClusterHint 集群路由提示，随数据面响应下发（对齐 PowerJob 的 app_info.current_server 语义）。
+// ClusterHint 集群路由提示，随数据面响应下发（与兼容协议的 app_info.current_server 语义对应）。
 //
-// 与 PowerJob 的关键差别：它那里 current_server 是**唯一通路**（server 主动 push 任务，
+// 与兼容目标的关键差别：它那里 current_server 是**唯一通路**（server 主动 push 任务，
 // worker 找不到 owner 就饿死，所以必须配 PING 判活、选举锁、连续失联就自杀本地秒级任务）；
 // 我们是 pull 模型 + 在线表在 DB，任何副本都能发活，所以 owner 只是**首选地址的提示**——
 // 猜错、猜晚、甚至完全拿不到，代价只是一次跨副本信号，不会让任务失败。
@@ -179,21 +209,21 @@ type FetchTaskReq struct {
 	WaitSeconds int    `json:"wait_seconds"`
 }
 
-// 处理器类型：PowerJob ProcessorType 枚举的字符串值。SHELL/PYTHON 在 PowerJob 5.x 已
-// @Deprecated 且 worker 侧没有任何 ProcessorFactory 支持它们，脚本任务的正解是
+// 处理器类型：兼容协议 ProcessorType 枚举的字符串值。SHELL/PYTHON 在兼容目标的 5.x 已
+// @Deprecated 且其 worker 侧没有任何 ProcessorFactory 支持它们，脚本任务的正解是
 // BUILT_IN + 官方脚本处理器的类全名（见 OfficialShellProcessor）。
 const (
 	ProcessorBuiltIn  = "BUILT_IN"
-	ProcessorExternal = "EXTERNAL" // PowerJob 的 JAR 动态容器：容器ID#类名
+	ProcessorExternal = "EXTERNAL" // 兼容协议的 JAR 动态容器：容器ID#类名
 )
 
-// OfficialShellProcessor 是 PowerJob 官方脚本处理器的类全名（powerjob-official-processors
-// 里的 tech.powerjob.official.processors.impl.script.ShellProcessor）。PowerJob 5.x 的
+// OfficialShellProcessor 是官方脚本处理器的类全名，即兼容协议里的
+// tech.powerjob.official.processors.impl.script.ShellProcessor。兼容目标的
 // "Shell 任务"就是 BUILT_IN + 这个类名 + 脚本文本放执行参数，gojob-agent 注册同名处理器，
 // 于是同一份任务配置在两边都能跑；导入旧的 SHELL 类型任务时也改写成它。
 const OfficialShellProcessor = "tech.powerjob.official.processors.impl.script.ShellProcessor"
 
-// 执行类型：PowerJob ExecuteType 枚举的字符串值。STANDALONE 一实例一任务；BROADCAST 由
+// 执行类型：兼容协议 ExecuteType 枚举的字符串值。STANDALONE 一实例一任务；BROADCAST 由
 // server 按在线节点枚举、每台一份；MAP 允许处理器在运行期派生任意多子任务；MAP_REDUCE 在
 // MAP 之上多一个 reduce 任务（子树排空后执行，它的返回值决定实例终态与结果）。
 // WORKFLOW 不在本期范围（gojob 用依赖触发表达前后置关系）。
@@ -205,7 +235,7 @@ const (
 	ExecuteWorkflow   = "WORKFLOW"
 )
 
-// 保留任务名：PowerJob OmsTask 的三个内部任务名。用户在 map() 里用这三个名字会被拒，
+// 保留任务名：兼容协议 OmsTask 的三个内部任务名。用户在 map() 里用这三个名字会被拒，
 // 否则收敛判定会把用户任务误当内部任务。
 const (
 	RootTaskName      = "OMS_ROOT_TASK"
@@ -215,7 +245,7 @@ const (
 	LastTaskKey       = "9999"
 )
 
-// CanMap 只有 MAP/MAP_REDUCE 的实例里允许处理器派生子任务——PowerJob 同语义：
+// CanMap 只有 MAP/MAP_REDUCE 的实例里允许处理器派生子任务——兼容协议同语义：
 // STANDALONE 里调 map 直接抛异常，而不是静默忽略。
 func CanMap(executeType string) bool {
 	return executeType == ExecuteMap || executeType == ExecuteMapReduce
@@ -227,19 +257,19 @@ type TaskDTO struct {
 	InstanceId uint64 `json:"instance_id"`
 	AppId      string `json:"app_id"`
 	Processor  string `json:"processor"`
-	// ProcessorType 处理器类型（PowerJob ServerScheduleJobReq.processorType 同义）：worker 用它
+	// ProcessorType 处理器类型（与兼容协议 ServerScheduleJobReq.processorType 同义）：worker 用它
 	// 区分"按注册名/类名找实现"（BUILT_IN）与"要动态加载容器"（EXTERNAL，gojob 未实现，
-	// 明确报错比"没注册"好查），对应 PowerJob 的 ProcessorFactory.supportTypes 分派。
+	// 明确报错比"没注册"好查），对应兼容协议 ProcessorFactory.supportTypes 的分派。
 	ProcessorType string `json:"processor_type"`
 	ExecuteType   string `json:"execute_type"`
 	// TaskKey/TaskName/SubTaskContent 是多任务形态的三件套：根任务 TaskKey="0"、负载为空，
 	// map 出来的子任务带自己的层次 ID、用户起的 taskName 和 JSON 负载。
-	// 对应 PowerJob TaskContext 的 getTaskId()/getTaskName()/getSubTask()。
+	// 对应兼容协议 TaskContext 的 getTaskId()/getTaskName()/getSubTask()。
 	TaskKey        string `json:"task_key"`
 	TaskName       string `json:"task_name"`
 	SubTaskContent string `json:"sub_task_content"`
 	JobParams      string `json:"job_params"`
-	FixedParams    string `json:"fixed_params"` // 单次触发的运行时参数（PowerJob instanceParams 语义）
+	FixedParams    string `json:"fixed_params"` // 单次触发的运行时参数（兼容协议的 instanceParams 语义）
 	Attempts       int    `json:"attempts"`     // 第几次尝试，从 1 开始
 	RetryTimes     int    `json:"retry_times"`
 	LogLevel       string `json:"log_level"` // 任务配置的日志级别，worker 侧过滤
@@ -261,9 +291,9 @@ type ReportTaskReq struct {
 	Result     string `json:"result"` // 处理器返回值或错误信息
 }
 
-// MapTaskReq 处理器在运行期派生子任务（PowerJob 的 ProcessorMapTaskRequest 对位）。
+// MapTaskReq 处理器在运行期派生子任务（兼容协议的 ProcessorMapTaskRequest 对位）。
 //
-// PowerJob 里这一步是 worker 内部 ask 给本机 TaskTracker、写进该节点的本地 task_info 表；
+// 兼容协议里这一步是 worker 内部 ask 给本机 TaskTracker、写进该节点的本地 task_info 表；
 // gojob 是 pull 模型且 worker 之间不通信，所以子任务必须经 server 落库后再走正常认领通道。
 // BatchNo 是"本任务第几次调 map"（SDK 侧自增，HTTP 重放时保持不变），与 TaskId 一起构成
 // 幂等键：重放同一批只会拿到已建好的任务 ID，不会重复派生。
@@ -293,7 +323,7 @@ type TaskResultsReq struct {
 	Limit      int    `json:"limit"`
 }
 
-// TaskResult 单个子任务的执行结果（PowerJob 的 TaskResult：taskId + success + result）。
+// TaskResult 单个子任务的执行结果（兼容协议的 TaskResult：taskId + success + result）。
 type TaskResult struct {
 	TaskKey  string `json:"task_key"`
 	TaskName string `json:"task_name"`
@@ -308,7 +338,7 @@ type TaskResultsResp struct {
 	Finished bool         `json:"finished"` // 该实例的子树是否已全部终态（reduce 的进入条件）
 }
 
-// InstanceDetailReq 实例详情弹窗（PowerJob 的 /instance/detailPlus 同位）。
+// InstanceDetailReq 实例详情弹窗（与兼容协议的 /instance/detailPlus 同位）。
 // CustomQuery 是控制台里那句 "select * from task_info where ___ limit 10" 的中间部分，
 // 服务端只认白名单语法、绝不拼进 SQL（见 server/api/instance_detail.go）。
 type InstanceDetailReq struct {
@@ -317,7 +347,7 @@ type InstanceDetailReq struct {
 	CustomQuery string `json:"custom_query"`
 }
 
-// StopInstanceReq 停止实例（对齐 PowerJob stopInstance 语义）。
+// StopInstanceReq 停止实例（与兼容协议的 stopInstance 语义一致）。
 // AppId 仅用于 RBAC 校验（非超管需按项目授权）；SUPER_ADMIN 可省略。
 type StopInstanceReq struct {
 	InstanceId uint64 `json:"instance_id"`
@@ -434,7 +464,7 @@ func IsTerminalTask(status string) bool {
 }
 
 // 实例触发来源（job_instance.source）。DEPENDENCY 是 gojob 扩展：
-// PowerJob 用工作流(DAG)表达任务依赖，这里允许下游任务直接挂一个上游任务，上游实例成功后自动触发。
+// 兼容协议用工作流(DAG)表达任务依赖，这里允许下游任务直接挂一个上游任务，上游实例成功后自动触发。
 const (
 	SourceDependency = "DEPENDENCY"
 )
@@ -469,15 +499,15 @@ type DeleteJobReq struct {
 	JobId uint64 `json:"job_id"`
 }
 
-// ---------- PowerJob 格式任务导入 ----------
-// 字段对齐 PowerJob 控制台导出的 JobDTO JSON（camelCase），指针表示"缺省即忽略"。
+// ---------- 兼容协议格式任务导入 ----------
+// 字段与兼容目标控制台导出的 JobDTO JSON 对齐（camelCase），指针表示"缺省即忽略"。
 
 type ImportJobsReq struct {
-	AppId string        `json:"app_id"`
-	Jobs  []PowerJobJob `json:"jobs"`
+	AppId string   `json:"app_id"`
+	Jobs  []JobDTO `json:"jobs"`
 }
 
-type PowerJobJob struct {
+type JobDTO struct {
 	JobName                *string `json:"jobName"`
 	JobDescription         *string `json:"jobDescription"`
 	TimeExpressionType     *string `json:"timeExpressionType"`
@@ -495,7 +525,7 @@ type PowerJobJob struct {
 	DispatchStrategy       *int    `json:"dispatchStrategy"`
 	DispatchStrategyConfig *string `json:"dispatchStrategyConfig"`
 	Enable                 *bool   `json:"enable"`
-	// 以下是 gojob 扩展字段：PowerJob 的导入方会忽略未知键，gojob 自己导出再导入则不丢配置。
+	// 以下是 gojob 扩展字段：兼容协议的导入方会忽略未知键，gojob 自己导出再导入则不丢配置。
 	InstanceParams  *string `json:"instanceParams"`  // 每次触发的默认运行时参数
 	SkipWhenRunning *bool   `json:"skipWhenRunning"` // 任务执行中则不发起新任务
 	LogLevel        *string `json:"logLevel"`

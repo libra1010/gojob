@@ -1,12 +1,12 @@
 # gojob
 
-轻量级分布式任务调度平台：单二进制 Server、零额外中间件，直连 MySQL / PostgreSQL / SQLite，Go / Java Worker 走 HTTP 长轮询接入，毫秒级调度与 MapReduce 内置。
+轻量级分布式任务调度平台：单二进制 Server + 一个数据库就是一套调度中心（MySQL / PostgreSQL / SQLite，零中间件），Go / Java Worker 走 HTTP 长轮询接入，广播与 MapReduce 内置；200 个执行节点在线时，一次广播 200 份任务在 150ms 内全部派发到位（口径与复现见「容量实机数字」）。
 
 一个 Server 进程 + 一个数据库就能起整套调度中心：调度与执行彻底分离，Server 只管"什么时候触发、派给谁、跑到哪一步了"，业务代码跑在 Worker 侧。不需要 ZooKeeper、不需要 Kafka/RocketMQ、不引入任何 RPC 框架，Worker 与 Server 之间只有 HTTP；要多副本就在同一套库上起 N 个进程（app 级租约归属 + fencing epoch，见「Server 集群（多副本）」节）。
 
-能力：控制台（Vue3）· 六种时间类型（CRON / 固定频率 / 固定延迟 / 每日固定间隔 / API / 依赖触发，后两种支持亚秒级）· 四种执行类型（单机、广播、Map、MapReduce）· 四种分发策略（健康优先 / 随机 / 标签定向 / 轮询）· 零代码脚本节点 `gojob-agent` · 协作式停止实例 · 任务日志不丢不重 · 三级角色 RBAC + 登录/操作审计 · 每个副本与每个 Worker 的运行时指标监控。
+能力：控制台（Vue3）· 六种时间类型（CRON / 固定频率 / 固定延迟 / 每日固定间隔 / API / 依赖触发，后两种支持亚秒级）· 四种执行类型（单机、广播、Map、MapReduce）· 四种分发策略（健康优先 / 随机 / 标签定向 / 轮询）· 零代码脚本节点 `gojob-agent`（控制台有专门的脚本录入入口）· 协作式停止实例 · 任务日志不丢不重 · 三级角色 RBAC + 登录/操作审计 · 任务包导入导出（可批量、可整项目）· 每个副本与每个 Worker 的运行时指标监控。
 
-暂不含工作流（Workflow，规划在 M5）。控制面协议、控制台交互与任务导入导出格式与 [PowerJob](https://github.com/PowerJob/PowerJob) 对齐，可以直接吃它导出的任务包；Worker 数据面是 gojob 自有的 HTTP 长轮询协议，不兼容 PowerJob 的 Worker（逐条差异见文末「与 PowerJob 的差异」）。
+暂不含工作流（Workflow，规划在 M5）。控制面协议、控制台交互与任务导入导出格式与 [PowerJob](https://github.com/PowerJob/PowerJob) 对齐，可以直接吃它导出的任务包；Worker 数据面是 gojob 自有的 HTTP 长轮询协议，不兼容 PowerJob 的 Worker（逐条差异见文末「兼容性说明」）。
 
 ## 架构
 
@@ -16,8 +16,8 @@
                     └──────────────┬────────────┘
                                    │ /openapi/*  (X-Gojob-Token)
                                    ▼
-   PowerJob 客户端 ─▶ ┌───────────────────────────┐ ◀── Go/Java Worker
-   /openApi/*  ─────▶ │        gojob-server        │     /worker/*  长轮询
+   OpenAPI 客户端 ─▶ ┌───────────────────────────┐ ◀── Go/Java Worker
+   /openApi/*  ────▶ │        gojob-server        │     /worker/*  长轮询
                       │  gin + gorm + encoding/json/v2 │
                       └──┬──────────┬──────────┬───┘
                          │          │          │
@@ -29,16 +29,16 @@
                      sqlite / mysql / postgres (gorm)
 ```
 
-- **调度器 scheduler**：**两层调度**（对齐 PowerJob）——粗扫线程每 5s 把 `next_trigger_time` 落在扫描窗口内的启用 Job 装载进**内存时间轮**（`Wheel`，tick 10ms），到点由时间轮精确触发，因此支持**亚秒级**周期；触发后生成 `job_instance` + `instance_task` 并原子推进下次时间。支持 skip_when_running（执行中不再发起新实例）。
-- **时间类型**：`CRON` / `FIXED_RATE`（周期**毫秒**，以上次计划时间为基准、不累积漂移）/ `FIXED_DELAY`（周期**毫秒**，从本次实际触发时刻再等一个周期）/ `DAILY_TIME_INTERVAL`（每日固定间隔：表达式为 PowerJob `DailyTimeIntervalExpress` 的 JSON，`{interval,intervalUnit,startTimeOfDay,endTimeOfDay,daysOfWeek}`，周一=1…周日=7，空=每天；只在时间窗内按间隔触发，窗口外顺延到下一有效日的窗口起点）/ `DEPENDENCY`（**依赖触发**，见下条）/ `API`（仅手动/OpenAPI 触发）。固定频率与固定延迟周期上限 **120000ms**，与 PowerJob `FREQUENT_JOB_MAX_INTERVAL` 一致。控制台建单可选类型并**预览最近 N 次触发时间**（毫秒精度，三种毫秒级类型的预览带 `.000` 毫秒位）。实例的 `source` 字段记录触发它的调度类型。
+- **调度器 scheduler**：**两层调度**——粗扫线程每 5s 把 `next_trigger_time` 落在扫描窗口内的启用 Job 装载进**内存时间轮**（`Wheel`，tick 10ms），到点由时间轮精确触发，因此支持**亚秒级**周期；触发后生成 `job_instance` + `instance_task` 并原子推进下次时间。支持 skip_when_running（执行中不再发起新实例）。
+- **时间类型**：`CRON` / `FIXED_RATE`（周期**毫秒**，以上次计划时间为基准、不累积漂移）/ `FIXED_DELAY`（周期**毫秒**，从本次实际触发时刻再等一个周期）/ `DAILY_TIME_INTERVAL`（每日固定间隔：表达式为 `DailyTimeIntervalExpress` 形状的 JSON，`{interval,intervalUnit,startTimeOfDay,endTimeOfDay,daysOfWeek}`，周一=1…周日=7，空=每天；只在时间窗内按间隔触发，窗口外顺延到下一有效日的窗口起点）/ `DEPENDENCY`（**依赖触发**，见下条）/ `API`（仅手动/OpenAPI 触发）。固定频率与固定延迟周期上限 **120000ms**，与兼容协议的 `FREQUENT_JOB_MAX_INTERVAL` 一致。控制台建单可选类型并**预览最近 N 次触发时间**（毫秒精度，三种毫秒级类型的预览带 `.000` 毫秒位）。实例的 `source` 字段记录触发它的调度类型。
 - **注册中心 registry**：Worker 心跳上报地址、内存、`sdk_type`（GO / JAVA / JAVA_SPRINGBOOT / JAVA_QUARKUS）与 runtime 指标，在线节点表**落在 `worker_nodes` 表里**（多副本下每个副本看到的候选集一致）。
 - **集群归属 cluster**：多个 Server 副本共用一套库时，按项目（app）划分调度所有权——`app_leases` 租约（TTL 10s / 3s 续约）决定谁调度，`epoch` + 事务内条件 UPDATE 挡住分区里的僵尸主，`cluster_signals` 单行计数器负责跨副本唤醒。详见「Server 集群（多副本）」节。
 - **节点监控 node**：每个 Server 副本每 5s 采样自己的进程指标（进程 CPU%、RSS/堆、协程数、GC 次数与累计暂停、活跃/空闲 HTTP 连接、长轮询在途、请求 QPS），按 `node_id` upsert 进 `server_nodes` 表，控制台聚合展示所有副本；Worker 的同类 runtime 指标随 `heartbeat` 上报，与节点信息一起进 `worker_nodes` 表。取不到的指标一律报 0、页面显示"—"，不用 0 冒充"很空闲"。详见「节点监控」节。
-- **停止实例**：`POST /openapi/instance/stop`（PowerJob 兼容层 `stopInstance` 同一实现）把停止意图写进 `instance_tasks.stop_request_time`，WAITING 任务当场置 `STOPPED`，RUNNING 任务由下一次 `fetchTask`/`heartbeat` 响应以 `cancel_task_ids` 捎带给 worker，SDK cancel 该任务的 ctx（Java 为 `Thread.interrupt`）后回报 `STOPPED`。因为意图在数据库里而不在连接里，**server 在下达指令后立刻宕机、稍后重启，停止依然会送达**（实测：worker 全程冻结 → 停止 → server SIGKILL 并重启 → 恢复 worker 后 12 秒内任务被取消，实例 `STOPPED`）。取消是协作式的：处理器必须响应 `ctx.Done()`／`InterruptedException`，否则会跑到自然结束——但**记账仍然是 `STOPPED`**（worker 侧只要收到过停止指令就按停止回报，不看处理器的返回值；实机验证：一个吞掉中断、跑满全程并返回成功的任务，实例与任务都是 `STOPPED`，结果列留着它自己那句"跑满了 30 秒"）。所以准确的表述是：**状态总是准的，副作用不一定停得住**。送达时延取决于有没有空闲并发额度：额度没占满时长轮询在飞，`StopInstance` 提交即唤醒、秒级送达；额度占满时 SDK 不再发 `fetchTask`，只能靠 5s 一跳的心跳捎带（实测从下达停止到任务收尾 4.92s）。
-- **分发策略**：入队时（`fire` / 手动触发）按 `dispatch_strategy` 预选执行节点，语义与 PowerJob `TaskTrackerSelector` 同构 —— `1 HEALTH_FIRST`（默认，打分公式 `(内存上限−已用)×2 + (可用核数−CPU负载)`）、`2 RANDOM`、`11 SPECIFY`（`dispatch_strategy_config`：`tagEquals:x` / `tagIn:x` / 逗号分隔 `ip:port`·tag，落空降级随机并告警）、`21 ROUND_ROBIN`（**gojob 扩展**，per-job 游标严格 A→B→A 轮流）。候选集先按 `designated_workers` 收窄；预选节点宕机/长时间不取件时，任务在 60s 后由 `ReleaseStaleTargets` 退回自由池，避免饿死。
+- **停止实例**：`POST /openapi/instance/stop`（OpenAPI 兼容层 `stopInstance` 同一实现）把停止意图写进 `instance_tasks.stop_request_time`，WAITING 任务当场置 `STOPPED`，RUNNING 任务由下一次 `fetchTask`/`heartbeat` 响应以 `cancel_task_ids` 捎带给 worker，SDK cancel 该任务的 ctx（Java 为 `Thread.interrupt`）后回报 `STOPPED`。因为意图在数据库里而不在连接里，**server 在下达指令后立刻宕机、稍后重启，停止依然会送达**（实测：worker 全程冻结 → 停止 → server SIGKILL 并重启 → 恢复 worker 后 12 秒内任务被取消，实例 `STOPPED`）。取消是协作式的：处理器必须响应 `ctx.Done()`／`InterruptedException`，否则会跑到自然结束——但**记账仍然是 `STOPPED`**（worker 侧只要收到过停止指令就按停止回报，不看处理器的返回值；实机验证：一个吞掉中断、跑满全程并返回成功的任务，实例与任务都是 `STOPPED`，结果列留着它自己那句"跑满了 30 秒"）。所以准确的表述是：**状态总是准的，副作用不一定停得住**。送达时延取决于有没有空闲并发额度：额度没占满时长轮询在飞，`StopInstance` 提交即唤醒、秒级送达；额度占满时 SDK 不再发 `fetchTask`，只能靠 5s 一跳的心跳捎带（实测从下达停止到任务收尾 4.92s）。
+- **分发策略**：入队时（`fire` / 手动触发）按 `dispatch_strategy` 预选执行节点，语义与兼容协议的 `TaskTrackerSelector` 同构 —— `1 HEALTH_FIRST`（默认，打分公式 `(内存上限−已用)×2 + (可用核数−CPU负载)`）、`2 RANDOM`、`11 SPECIFY`（`dispatch_strategy_config`：`tagEquals:x` / `tagIn:x` / 逗号分隔 `ip:port`·tag，落空降级随机并告警）、`21 ROUND_ROBIN`（**gojob 扩展**，per-job 游标严格 A→B→A 轮流）。候选集先按 `designated_workers` 收窄；预选节点宕机/长时间不取件时，任务在 60s 后由 `ReleaseStaleTargets` 退回自由池，避免饿死。
 - **依赖触发（一种调度方式）**：把任务的「时间类型」选成 `DEPENDENCY`，再选一个「上游任务」（`upstream_job_id`）——上游的一次执行**成功**收尾后，Server 立刻为下游创建实例（`source=DEPENDENCY`，实例上记录 `upstream_instance_id`），下游按自身的分发策略与参数独立执行；上游失败或被停止不传导。幂等靠 `job_instances` 的 `(job_id, upstream_instance_id)` 唯一索引——worker 回报重试、server 重启后重放都只会触发一次。该类型没有 cron/周期表达式、不会被时间驱动；反之其他时间类型不允许残留 `upstream_job_id`，所以依赖关系只可能来自这一种调度方式，任务列表的「时间表达式」列会直接显示它在等哪个上游。保存期校验：必须选上游、上游须同项目、非自身、不成环；仍有下游依赖它的任务不允许删除。
 - **派发 dispatch**：Worker 长轮询 `fetchTask` 认领任务（只取 `target_worker_id` 为空或指向自己的）→ 执行 → `report` 回报；失败重入队列重试（重试与回收都会清空预选）；`ReassignLostTasks`（5 分钟）回收失联任务；回报幂等（已终态的 task 忽略重复回报）。
-- **任务树（BROADCAST / MAP / MAP_REDUCE）**：一个实例是一棵 `instance_tasks` 树，根任务 `task_key='0'`、`parent_task_id=0`。`BROADCAST` 由 Server 在触发那一刻按在线节点快照展开，每台一行、各自钉在自己的 `target_worker_id` 上；`MAP`/`MAP_REDUCE` 由处理器运行期调 `map()` 经 `POST /worker/mapTask` 派生（派生幂等键 = `(父任务, 第几次尝试, 第几批)`，所以父任务重跑能重新派出一批，而旧一代未收敛的后代被置 `DISCARDED` 不重复执行副作用）。实例是否收敛**不靠计数器递减**，而是每次现算 `COUNT(status IN (WAITING,RUNNING))`，崩溃在两步之间也不会把计数打歪；`MAP_REDUCE` 在树排空的那一刻才补出 reduce 行（`OMS_LAST_TASK` / `9999`），由它经 `POST /worker/taskResults` 分页取回全部子任务结果，它的返回值就是实例结果。控制台的实例详情走 `POST /openapi/instance/detailPlus`（`Task 统计` + 子任务分页，那句 `select * from task_info where …` 只认白名单语法）。详见「与 PowerJob 的差异」里的两处刻意偏离。
+- **任务树（BROADCAST / MAP / MAP_REDUCE）**：一个实例是一棵 `instance_tasks` 树，根任务 `task_key='0'`、`parent_task_id=0`。`BROADCAST` 由 Server 在触发那一刻按在线节点快照展开，每台一行、各自钉在自己的 `target_worker_id` 上；`MAP`/`MAP_REDUCE` 由处理器运行期调 `map()` 经 `POST /worker/mapTask` 派生（派生幂等键 = `(父任务, 第几次尝试, 第几批)`，所以父任务重跑能重新派出一批，而旧一代未收敛的后代被置 `DISCARDED` 不重复执行副作用）。实例是否收敛**不靠计数器递减**，而是每次现算 `COUNT(status IN (WAITING,RUNNING))`，崩溃在两步之间也不会把计数打歪；`MAP_REDUCE` 在树排空的那一刻才补出 reduce 行（`OMS_LAST_TASK` / `9999`），由它经 `POST /worker/taskResults` 分页取回全部子任务结果，它的返回值就是实例结果。控制台的实例详情走 `POST /openapi/instance/detailPlus`（`Task 统计` + 子任务分页，那句 `select * from task_info where …` 只认白名单语法）。详见「兼容性说明」里的两处刻意偏离。
 - **日志通道 logs**：Worker 采集执行日志批量上报 `reportLogs`，见下文「任务执行日志」。
 
 ## 目录
@@ -48,10 +48,11 @@
 | `cmd/gojob-server` | Server 可执行程序入口 |
 | `cmd/gojob-demo` | Go SDK 示例 Worker（hello / slow / failOnce 处理器） |
 | `cmd/gojob-agent` | 零代码执行节点：不写代码，只跑脚本库里预置的 Shell 脚本，见 `worker/README.md` |
+| `cmd/gojob-loadgen` | 容量与派发延迟的节点发生器（一台机器起 N 个真 worker 节点），供 `scripts/verify-capacity.sh` 用，见「容量实机数字」 |
 | `server/` | Server 内部分层：`api` `auth` `store` `scheduler` `registry` `dispatch` `cleanup`（历史实例回收）`cluster`（副本归属租约 + 跨副本唤醒信号）`node`（进程自监控） |
 | `worker/` | Go Worker SDK（供业务进程内嵌） |
 | `internal/proc` | 跨平台进程指标原语（CPU 时间 / RSS / 打开 fd），Server 与 Go SDK 共用 |
-| `internal/agent` | Shell 脚本处理器（PowerJob 官方脚本处理器的对位实现）：脚本库解析、参数、超时、进程组取消 |
+| `internal/agent` | Shell 脚本处理器（官方脚本处理器的对位实现）：脚本库解析、参数、超时、进程组取消 |
 | `internal/protocol` | Server ↔ Worker / 控制台共用协议与数据模型 |
 | `dashboard/` | Vue3 + Element Plus 控制台 |
 | `sdk-java/` | Java Worker SDK（core + Spring Boot starter + Quarkus 示例） |
@@ -72,6 +73,16 @@ docker compose --profile postgres up -d
 # 再加一个零代码脚本节点（默认不起，安全含义见 worker/README）：
 GOJOB_SCRIPT_LIB=./scripts-lib docker compose --profile agent up -d
 ```
+
+**docker.io 拉不动的机器**（国内）改用镜像版 Dockerfile：基础镜像是华为云 SWR 的搬运副本，构建期模块代理走 goproxy.cn，其余（target / 构建参数 / 产物布局）与默认那份逐行一致。
+
+```bash
+GOJOB_DOCKERFILE=Dockerfile.cn docker compose up -d --build
+# 或单独构建一个镜像：
+docker build -f Dockerfile.cn --build-arg BUILD_TARGET=gojob-server -t gojob/gojob-server:latest .
+```
+
+这个开关只覆盖我们自己构建的三个镜像（server / demo / agent）；`mysql`、`postgres`、`curlimages/curl` 是上游镜像，要换源得各自改 `image:` 或配 docker daemon 的 `registry-mirrors`。SWR 那两个 tag 由对方仓库同步进度决定，撞上"还没同步这个 tag"时用 `--build-arg ALPINE_IMAGE=…/alpine:3.20` 换一个即可，不必改文件。
 
 启动后：
 - 控制台 <http://localhost:8080>，默认账号 `admin / admin123`（**上线第一件事就是改密码**）
@@ -131,7 +142,7 @@ func main() {
 
 **不写代码：起一个 `gojob-agent`**，把脚本丢进脚本库，任务里填脚本文件名即可。默认只允许执行脚本库里的裸文件名（越界路径直接拒绝），内联脚本文本要显式开 `GOJOB_AGENT_ALLOW_INLINE_SCRIPTS`。这个进程等同于"拿到项目口令的人能在该主机执行命令"，请部署到隔离网段——完整边界写在 `worker/README.md`「零代码执行节点」。
 
-任务在控制台里建，也可以走 OpenAPI 或从 PowerJob 导出包导入。Worker 侧只需要三样东西：Server 地址、项目 ID、项目口令（注册时换一张短期 token，之后数据面不再带口令）。
+任务在控制台里建，也可以走 OpenAPI，或导入兼容协议导出的任务包。Worker 侧只需要三样东西：Server 地址、项目 ID、项目口令（注册时换一张短期 token，之后数据面不再带口令）。
 
 ## 数据库初始化
 
@@ -167,9 +178,13 @@ psql -U postgres < scripts/ddl/postgres.sql
 
 `scripts/verify-java-routing.sh`（Java SDK 侧的同一套验收，18 项断言，约 3 分钟）：`mvn -o test-compile` 出 `gojob-worker-core`，用 test 目录里的 `QuickStart` 起 **4 个 Java worker**（地址列表两两反向）打到两个副本上，验证收敛到 owner、"首地址即 owner 的不迁 / 非 owner 的恰好迁 1 次"、领任务与回报 SUCCEED、`SIGSTOP` 冻结 owner 后靠 15s 短超时认出僵尸副本并跟到新 owner（4/4）、冻结期间实例照样产生并完成、解冻不抢回、全程无双跑。端口 `7861/7862`。
 
-`scripts/verify-shell-agent.sh`（**自己起进程**的零代码执行节点实机验收，38 项断言，约 45 秒）：编译 Server + `gojob-agent` + `gojob-demo`，一个 agent（带脚本库、tag=executor）与一个 Go 业务 worker 同时挂在一个项目下，验证 ① 脚本库里的脚本既能用短名 `shell` 也能用官方类全名当处理器信息来跑，任务参数按位置参数进脚本，stdout 进 INFO、stderr 进 WARN；② **内联脚本文本默认被拒**，失败原因里点名 `GOJOB_AGENT_ALLOW_INLINE_SCRIPTS`，改配置重启后确实能跑（并且启动时打了告警）；③ 非 0 退出码原样进结论、stderr 尾部被带回；④ `SPECIFY tagEquals:executor` 把任务锁在 agent 那一跳（用反向证据确认：没有第二条链路能让 demo worker 报出脚本里的句子），并如实记录"失败重试会清空预选、换节点重跑"这个既有行为；⑤ `EXTERNAL` 被两个 worker 都明确拒绝且报错点名 JAR 动态容器；⑥ 停止实例杀掉**整个进程组**（脚本自己起的后台孙子进程也一起没了，不是只杀 `/bin/sh`）；⑦ 导入老 PowerJob 导出包时 `SHELL` 任务被改写成 `BUILT_IN` + 官方脚本处理器（脚本正文搬到任务参数）并**真的能被 agent 跑起来**，`PYTHON`/`EXTERNAL` 逐条带原因被拒且不落库。默认 sqlite，端口 `7881~7883`，可用 `GO/PORT/APP/PW/SECRET` 覆盖。
+`scripts/verify-shell-agent.sh`（**自己起进程**的零代码执行节点实机验收，38 项断言，约 45 秒）：编译 Server + `gojob-agent` + `gojob-demo`，一个 agent（带脚本库、tag=executor）与一个 Go 业务 worker 同时挂在一个项目下，验证 ① 脚本库里的脚本既能用短名 `shell` 也能用官方类全名当处理器信息来跑，任务参数按位置参数进脚本，stdout 进 INFO、stderr 进 WARN；② **内联脚本文本默认被拒**，失败原因里点名 `GOJOB_AGENT_ALLOW_INLINE_SCRIPTS`，改配置重启后确实能跑（并且启动时打了告警）；③ 非 0 退出码原样进结论、stderr 尾部被带回；④ `SPECIFY tagEquals:executor` 把任务锁在 agent 那一跳（用反向证据确认：没有第二条链路能让 demo worker 报出脚本里的句子），并如实记录"失败重试会清空预选、换节点重跑"这个既有行为；⑤ `EXTERNAL` 被两个 worker 都明确拒绝且报错点名 JAR 动态容器；⑥ 停止实例杀掉**整个进程组**（脚本自己起的后台孙子进程也一起没了，不是只杀 `/bin/sh`）；⑦ 导入老版任务包时 `SHELL` 任务被改写成 `BUILT_IN` + 官方脚本处理器（脚本正文搬到任务参数）并**真的能被 agent 跑起来**，`PYTHON`/`EXTERNAL` 逐条带原因被拒且不落库。默认 sqlite，端口 `7881~7883`，可用 `GO/PORT/APP/PW/SECRET` 覆盖。
 
-`scripts/verify-map-broadcast.sh`（**自己起进程**的多任务执行类型实机验收，102 项断言，约 30 秒）：Server + 2 个 Go worker，把"一个实例一棵任务树"真跑一遍——① `BROADCAST` 恰好每台在线节点一份、两分落在两个不同节点上（预选==实际执行节点）、层次号 `0.1`/`0.2`，根任务自己不占节点；② 广播落在**零个**节点上时当场收敛，不会留一个永远等不到回报的实例；③ `MAP` 由根任务运行期派生子任务、实例任务数随之从 1 涨到 4（控制台"任务进度"列读的就是它），并支持多级派生（`0.1.2` 这样的层次号）；④ `MAP` 下任一子任务失败即实例失败，而 `MAP_REDUCE` 下 reduce 兜住部分失败就判成功——同一份"坏第 2 片"的输入走出两种结论，这才是两种类型的分界；⑤ `MAP_REDUCE` 的 reduce（`OMS_LAST_TASK`，层次号 `9999`）只在树排空后才补出来，它的返回值就是实例结果；⑥ 停止实例时未派发的当场终止、运行中的协作退出，而且**不会**再补一个 reduce 任务；⑦ 父任务被重派后，旧一代未收敛的后代置 `DISCARDED`（不重复执行副作用），新一代照常派得出来；⑧ `STANDALONE` 实例里调 `map` 被明确拒绝；⑨ 实例详情接口的 `Task 统计` 与那句 `select * from task_info where … limit 10`：白名单写法（含 PowerJob 的 `status` 序号）照常工作，`; drop table` / `or 1=1` / 注释符 / `union select` 全部被拒且**弹窗不白屏**（照常返回实例信息 + 拒绝原因）。默认 sqlite，端口 `7891~7893`，可用 `GO/PORT/APP/PW/SECRET` 覆盖。
+`scripts/verify-register-encryption.sh`（**自己起进程**的注册口令加密实机验收，47 项断言，约 2 分钟）：按"未启用 → 已启用可明文 → 已启用强制"三档滚动重启同一个 Server，逐项验证 ① 未启用时明文注册与 `authApp` 行为不变、`/worker/challenge` 直接点名 `GOJOB_WORKER_AES_KEYS` 拒绝；② 加密注册换到的票照常能心跳、领任务、跑成功，注册体里搜不到口令明文；③ **同一个注册包重放被拒**（换副本也拒，一次性记录在库里）、把密文挪到别人的 `instance_id` 上冒用被拒、**同一口令两次注册的密文不同**；④ 两侧 key 不一致时报 `unknown key id` 且文案不含"password"（不去怀疑口令）、未知 `auth_scheme` 被拒；⑤ 强制档下明文回 **428** + 一张现领的 challenge，用它一次往返即成功，而这张票同样只用一次；没配 key 的 worker 启动即失败并指向 `worker.Config.AesKey`；⑥ `authApp` 三档同上，加密换来的兼容票读得到任务列表；⑦ **Go 与 Java 两个真 worker 进程各自走完整握手上线**（Java 侧还先跑完单测：用 Java 解开 Go 产出的黄金密文）；⑧ 整轮服务端日志里搜不到项目口令。手工构造请求体用 `scripts/register-seal`（与服务端同一份线格式实现，不用 SDK 自己证明自己）。默认 sqlite，端口 `7795`，`JAVA=0` 可跳过 Java 段。
+
+`scripts/verify-map-broadcast.sh`（**自己起进程**的多任务执行类型实机验收，102 项断言，约 30 秒）：Server + 2 个 Go worker，把"一个实例一棵任务树"真跑一遍——① `BROADCAST` 恰好每台在线节点一份、两分落在两个不同节点上（预选==实际执行节点）、层次号 `0.1`/`0.2`，根任务自己不占节点；② 广播落在**零个**节点上时当场收敛，不会留一个永远等不到回报的实例；③ `MAP` 由根任务运行期派生子任务、实例任务数随之从 1 涨到 4（控制台"任务进度"列读的就是它），并支持多级派生（`0.1.2` 这样的层次号）；④ `MAP` 下任一子任务失败即实例失败，而 `MAP_REDUCE` 下 reduce 兜住部分失败就判成功——同一份"坏第 2 片"的输入走出两种结论，这才是两种类型的分界；⑤ `MAP_REDUCE` 的 reduce（`OMS_LAST_TASK`，层次号 `9999`）只在树排空后才补出来，它的返回值就是实例结果；⑥ 停止实例时未派发的当场终止、运行中的协作退出，而且**不会**再补一个 reduce 任务；⑦ 父任务被重派后，旧一代未收敛的后代置 `DISCARDED`（不重复执行副作用），新一代照常派得出来；⑧ `STANDALONE` 实例里调 `map` 被明确拒绝；⑨ 实例详情接口的 `Task 统计` 与那句 `select * from task_info where … limit 10`：白名单写法（含兼容协议的 `status` 序号）照常工作，`; drop table` / `or 1=1` / 注释符 / `union select` 全部被拒且**弹窗不白屏**（照常返回实例信息 + 拒绝原因）。默认 sqlite，端口 `7891~7893`，可用 `GO/PORT/APP/PW/SECRET` 覆盖。
+
+`scripts/verify-capacity.sh`（**自己起进程**的容量实机验收，约 2 分钟/200 节点）：一台机器上用 Go SDK 起 `NODES` 个真 worker 节点（注册/换票/长轮询/回报全走 SDK 原路径），等在线数到位后连打 `ROUNDS` 轮 `BROADCAST`，逐轮打出派发延迟分位数与服务端开销（空闲态与压完态各一次），并把 SDK 侧的注册退避次数一并报出来。**脚本故意不对数字做门限判断**——阈值该由实测反过来定，不是先定再调；具体数字见「容量实机数字」节。节点发生器是 `cmd/gojob-loadgen`（`-nodes/-rounds/-concurrency/-work/-hold/-lead/-idle/-sdklog`，`-idle` 用来只测在线开销不触发）。默认 sqlite，端口 `7877`，`NODES/ROUNDS/CONC/PORT/DSN/LEAD` 可覆盖（跑 200 节点需要 `ulimit -n` ≥ 4096）。
 
 ## 配置
 
@@ -185,25 +200,28 @@ psql -U postgres < scripts/ddl/postgres.sql
 | `GOJOB_PUBLIC_URL` | `-public-url` | 自动推导 | 本副本的**对外可达地址**：随心跳下发给 worker 作为长轮询目标（`cluster_hint`），同时在统计总览页展示。留空按监听地址推导（`0.0.0.0` 会换成本机出口 IP）；多副本部署时每副本各填自己"worker 打得通"的地址 |
 | `GOJOB_CLUSTER_SECRET` | `-cluster-secret` | 空 → 本进程随机 | **令牌签名密钥**。多副本必须各节点配同一个值，否则跨节点互不认票（登录随机掉线、worker 随机 401）；留空只适用于单副本，启动日志会打 WARNING。轮换 = 所有在野令牌即刻失效。建议 `openssl rand -hex 32` |
 
+| `GOJOB_WORKER_AES_KEYS` | `-worker-aes-keys` | 空 → 不启用 | **注册口令加密的 AES-256 key**（64 位 hex，逗号分隔多把只为轮换期并存）。配了它，注册走"一次性 challenge + AES-256-GCM"，项目口令不再明文上链路。多副本必须各节点配同一套；建议 `openssl rand -hex 32`。见「注册口令加密」 |
+| `GOJOB_WORKER_AES_REQUIRED` | `-worker-aes-required` | `false` | 在上一行的基础上进一步要求**所有**注册都必须加密，明文注册直接拒（`428` + 一张现领的 challenge）。前提是所有 worker 都已配 key，否则它们全注册不上 |
+
 | `GOJOB_RETENTION_DAYS` | `-retention-days` | 空 → 永不清理 | **历史实例保留天数**（运维必配）。终态实例超过它就连同子任务、任务日志一起删；两边都不配则三张历史表只增不减。见「数据保留与容量」 |
 | `GOJOB_DB_MAX_OPEN_CONNS` | `-db-max-open-conns` | mysql/pg 20 · sqlite 10 | 数据库连接上限。不设等于无限，worker 惊群拉单时会一路新建连接并顶到 MySQL 默认 `max_connections=151`。多副本估算见下 |
 | `GOJOB_DB_MAX_IDLE_CONNS` | `-db-max-idle-conns` | 跟随上面的最大值 | 空闲连接保留数 |
 
-Worker 侧示例进程读取：`GOJOB_WORKER_SERVER` / `GOJOB_WORKER_APP` / `GOJOB_WORKER_PASSWORD` / `GOJOB_WORKER_DRAIN_ADDR`。零代码执行节点 `gojob-agent` 另有 `GOJOB_AGENT_*` 六个变量（脚本库、内联开关、并发、工作目录、超时、下线端点），清单与安全含义见 `worker/README.md`「零代码执行节点」与 `.env.example`。
+Worker 侧示例进程读取：`GOJOB_WORKER_SERVER` / `GOJOB_WORKER_APP` / `GOJOB_WORKER_PASSWORD` / `GOJOB_WORKER_DRAIN_ADDR`，以及 `GOJOB_WORKER_AES_KEY`（与服务端某一把 key 一致即可，两侧只配 key、不配 kid）。零代码执行节点 `gojob-agent` 另有 `GOJOB_AGENT_*` 六个变量（脚本库、内联开关、并发、工作目录、超时、下线端点），清单与安全含义见 `worker/README.md`「零代码执行节点」与 `.env.example`。
 
 ## API 概览
 
 三组接口，均返回 `{code, message, data}`（`code=0` 为成功）。
 
 **控制台 `/openapi/*`**（除 login 外需 `X-Gojob-Token` 头）
-`user/{login,logout,me,changePassword,list,create,modify,resetPassword,status,delete}` · `app/{create,modify,delete,list,workers}`（`app/list` 每行带 `current_server` = 当前调度该项目的副本 `node_id`，对齐 PowerJob 应用列表的 currentServer 列） · `job/{create,modify,delete,get,list,operate,import,export,previewTime}`（`job/list` = `index`(0 基) + `page_size` + `job_id` + `keyword`，返回 `PageResult`；`job/export` 回 PowerJob JobDTO；`job/operate` 的 `trigger` 可带 `instance_params`＝参数运行） · `instance/{list,get,tasks,logs,stop,detailPlus}`（`detailPlus` = 实例详情弹窗：实例行 + `Task 统计` + 一页子任务，`custom_query` 只认白名单语法） · `stats/overview` · `audit/{loginLogs,operationLogs}` · `system/nodes`（节点监控：副本指标 + worker 指标 + 项目调度归属表，`ADMIN`/`SUPER_ADMIN`）
+`user/{login,logout,me,changePassword,list,create,modify,resetPassword,status,delete}` · `app/{create,modify,delete,list,workers}`（`app/list` 每行带 `current_server` = 当前调度该项目的副本 `node_id`，列名沿用兼容协议的 currentServer） · `job/{create,modify,delete,get,list,operate,import,export,previewTime}`（`job/list` = `index`(0 基) + `page_size` + `job_id` + `keyword`，返回 `PageResult`；`job/export` 回通用任务包（JobDTO 数组/对象）；`job/operate` 的 `trigger` 可带 `instance_params`＝参数运行） · `instance/{list,get,tasks,logs,stop,detailPlus}`（`detailPlus` = 实例详情弹窗：实例行 + `Task 统计` + 一页子任务，`custom_query` 只认白名单语法） · `stats/overview` · `audit/{loginLogs,operationLogs}` · `system/nodes`（节点监控：副本指标 + worker 指标 + 项目调度归属表，`ADMIN`/`SUPER_ADMIN`）
 
 **Worker 数据面 `/worker/*`**（gojob 自有协议，gojob SDK 使用）
-`register`（用 `app_id + password` 换取 worker token，**数据面唯一需要口令的端点**）· `heartbeat` `fetchTask`（长轮询认领）`report`（回报，幂等）`reportLogs`（批量日志，去重）`mapTask`（`MAP`/`MAP_REDUCE` 的处理器运行期派生子任务）`taskResults`（reduce 分页取回子任务结果）——除 `register` 外这六个只带 token，不再携带项目口令。`mapTask` 与 `report` 同样校验任务归属（只有正在执行该任务的节点能为它派生/改判），`fetchTask` 与 `heartbeat` 的响应携带 `cancel_task_ids`：pull 模型没有反向连接，停止实例等下行指令只能靠响应夹带下发。
+`register`（用 `app_id + password` 换取 worker token，**数据面唯一需要口令的端点**；配了注册加密后口令改由 `challenge + kid + iv + ciphertext` 送上）· `challenge`（注册握手第一步：领一张 30s 过期、用过即废的凭证，未启用加密时明确拒绝）· `heartbeat` `fetchTask`（长轮询认领）`report`（回报，幂等）`reportLogs`（批量日志，去重）`mapTask`（`MAP`/`MAP_REDUCE` 的处理器运行期派生子任务）`taskResults`（reduce 分页取回子任务结果）——除 `register`/`challenge` 外这六个只带 token，不再携带项目口令。`mapTask` 与 `report` 同样校验任务归属（只有正在执行该任务的节点能为它派生/改判），`fetchTask` 与 `heartbeat` 的响应携带 `cancel_task_ids`：pull 模型没有反向连接，停止实例等下行指令只能靠响应夹带下发。
 token 是**无状态签名票**（HMAC-SHA256，密钥 `GOJOB_CLUSTER_SECRET`），与签发时的 `app_id + instance_id` 绑定，有效期 10 分钟；因为票里带着"按哪个吊销基线签发"，任何副本都能独立校验，改项目口令/删项目会把该项目此前签发的全部票即刻作废（库里 `token_epoch` +1）。SDK 在有效期过半时主动重注册换票，遇 401（重启、密钥轮换、口令变更）也会自动重注册并重放当次请求，业务侧无感。
 
-**PowerJob 兼容层 `/openApi/*`**（PowerJob 4.x 客户端/OpenAPI，注意大小写）
-`authApp` · `saveJob` `fetchJob` `fetchAllJob` `queryJob` `exportJob` `copyJob` `disableJob` `enableJob` `deleteJob` `runJob` `runJob2` `stopInstance` `retryInstance` `fetchInstanceStatus` `fetchInstanceInfo` `queryInstance`（Workflow 系列返回「不支持，规划 M5」）
+**OpenAPI 兼容层 `/openApi/*`**（对接外部调度平台的 4.x 客户端/OpenAPI，注意大小写）
+`authApp`（`password` 明文，或 gojob 自己的加密握手 `authScheme=aes-gcm`；`encryptedPassword`=md5 形态按设计拒绝）· `challenge`（握手下票，`principal` 为空——调用方没有实例身份）· `saveJob` `fetchJob` `fetchAllJob` `queryJob` `exportJob` `copyJob` `disableJob` `enableJob` `deleteJob` `runJob` `runJob2` `stopInstance` `retryInstance` `fetchInstanceStatus` `fetchInstanceInfo` `queryInstance`（Workflow 系列返回「不支持，规划 M5」）
 
 ## 任务执行日志
 
@@ -218,7 +236,7 @@ token 是**无状态签名票**（HMAC-SHA256，密钥 `GOJOB_CLUSTER_SECRET`）
 
 ## 账号、权限与审计
 
-> 本节为 gojob 在 PowerJob 之上的**增强项**（PowerJob 仅有应用级隔离，无 RBAC / 审计）。控制台「系统管理」菜单进入。
+> 本节是 gojob 的**自研能力**：三级角色 + 审计留痕（兼容目标只有应用级隔离，无 RBAC / 审计）。控制台「系统管理」菜单进入。
 
 **角色（三级）**
 
@@ -237,16 +255,63 @@ token 是**无状态签名票**（HMAC-SHA256，密钥 `GOJOB_CLUSTER_SECRET`）
 **口令存储与安全边界**
 
 - **用户密码**：bcrypt 摘要（`user_infos.password`，`json:"-"` 不外泄）。
-- **项目（App）密码**：库里只有 bcrypt 摘要（`app_infos.password`，`json:"-"`），**不存在明文，也不存在任何"明文等价物"**。曾经为兼容 PowerJob `authApp` 保留过 `password_md5 = lower(md5(明文))` 一列，该列已删除——md5 摘要对冒用者而言与明文无异，安全位阶高于协议兼容（代价见「与 PowerJob 的差异」）。
+- **项目（App）密码**：库里只有 bcrypt 摘要（`app_infos.password`，`json:"-"`），**不存在明文，也不存在任何"明文等价物"**。曾经为兼容 `authApp` 保留过 `password_md5 = lower(md5(明文))` 一列，该列已删除——md5 摘要对冒用者而言与明文无异，安全位阶高于协议兼容（代价见「兼容性说明」）。
 - 老库升级：进程启动时 `auth.UpgradeAppPasswords` 把仍是明文的 `app_infos` 原地升级为 bcrypt（幂等，日志会打印升级条数）；MySQL/PG 存量库可手动 `ALTER TABLE app_infos DROP COLUMN password_md5;`（不删也不影响运行，只是留了一份没人读的旧摘要）。
 - **Worker 数据面**：`POST /worker/register` 用 `app_id + password` 换一张 token，之后 `heartbeat`/`fetchTask`/`report`/`reportLogs` 四个端点**只带 token、不再带口令**（口令从"每个请求都出现"收缩为"只出现在注册那一刻"）。token 与签发时的 `app_id + instance_id` 绑定：拿着别人的 token 既领不到别人的任务、也改判不了别人的任务结果（服务端按 `identity mismatch` 记日志并回 401）；日志上报还会校验任务归属本 app；`report` 只接受**认领该任务的那台 worker** 的回报，越权/迟到回报被静默忽略（防同项目内互相改判、防失联 worker 复活污染已重派任务）。
 - **换项目口令 = 立即踢人**：`app/modify` 改口令或 `app/delete` 删项目会吊销该项目全部 token，老节点必须用新口令重新注册才能继续收单（因此**改口令后需把 worker 的配置同步更新并重启**，否则它会在日志里持续报 `register rejected: wrong password`）。
 - token 是**无状态签名票**（默认 10 分钟有效，无 DB 表、无控制台管理页）：SDK 在有效期过半时主动重注册换票，所以存活节点永不掉线；服务端重启不再让节点重新注册（票仍然验得过），换项目口令/删项目才会让它即刻失效。
-- 边界（不粉饰）：① 口令与 token 都走 HTTP 明文 ⇒ 必须置于内网或前置 TLS；② 能注册（= 知道项目口令）就能收单，多节点共享同一份项目口令，更细的授权（按任务/按标签限流）不在一期范围；③ **token 一旦被窃取，在有效期内可冒用该节点身份**（只能用它绑定的那个 `instance_id`，不能换身份），且当前只能按项目整体吊销（改口令）不能单票吊销——所以 worker 主机本身仍按持有长期凭据对待。
+- 边界（不粉饰）：① **注册口令可选加密**（见下一节「注册口令加密」，配 `GOJOB_WORKER_AES_KEYS` 后口令不再明文上线），但 token、任务参数、执行日志照旧是 HTTP 明文内容 ⇒ 整体仍需置于内网或前置 TLS；② 能注册（= 知道项目口令）就能收单，多节点共享同一份项目口令，更细的授权（按任务/按标签限流）不在一期范围；③ **token 一旦被窃取，在有效期内可冒用该节点身份**（只能用它绑定的那个 `instance_id`，不能换身份），且当前只能按项目整体吊销（改口令）不能单票吊销——所以 worker 主机本身仍按持有长期凭据对待。
+
+## 注册口令加密
+
+> 目标只有一个：**让项目口令本身不出现在链路上**，并且让抓到一个注册包的人无法复用它。
+> 它**不是传输加密**——把这段当成"开了加密就安全了"是误用，见本节末尾的边界。
+> 默认关闭（不配 key 时行为与引入本功能前完全一致）。
+
+**握手三步**（`/worker/register` 与兼容协议的 `/openApi/authApp` 同一套口径，只差身份字段）：
+
+```
+1. POST /worker/challenge   {app_id, instance_id}          → {challenge, expires_in, schemes}
+2. 本地 AES-256-GCM 加密 {v, app_id, instance_id, challenge, password}
+3. POST /worker/register    {…, auth_scheme:"aes-gcm", kid, iv, challenge, ciphertext}
+```
+
+三件东西各管一件事，缺一个整套就白做：
+
+| 环节 | 为什么必须有 |
+| --- | --- |
+| 一次性 `challenge`（服务端现发、30s 过期、**用过即废**） | 固定因子 + 固定 key 会得到确定性密文，那串密文就成了口令的替身，抓到即可永久冒用。消费记录落在 `revoked_tokens` 表的主键上，所以**跨副本也认**：A 副本用掉的票，B 副本不认第二次 |
+| AES-**256-GCM**（不是 CBC） | CBC 没有完整性，解出垃圾时分不清"key 错 / 被改过 / 口令错"，把这几类返成不同文案就是 padding oracle 的入口。GCM 的 tag 校验失败只有一个结局，服务端也只回一条含糊文案 |
+| `AAD = 版本 + kid + app_id`，明文中再带 `app_id`/`instance_id`/`challenge` | 防"拿 A 项目算好的密文配着 B 项目的表头来注册"、防把别人的注册包挪到别的 `instance_id` 名下冒用 |
+
+密钥派生用 HKDF-SHA256，`salt` 里带 `app_id` ⇒ **同一把全局 key 在不同项目下派生出不同的 AES key**，跨项目冒用没有可乘之机。`kid` 由 key 单向派生（sha256 前 4 字节），两侧只配 key 就能互认，写不出错配的 kid。
+
+**三档配置与升级顺序**（"是否加密"由人员两侧配置决定，程序不自动协商降级）：
+
+| 服务端 | 客户端 | 结果 |
+| --- | --- | --- |
+| 未配 key | 任意 | 明文口令注册（现状不变）；`/worker/challenge` 直接拒绝并点名 `GOJOB_WORKER_AES_KEYS` |
+| 配 `KEYS`、未开 `REQUIRED` | 配了 key | 走加密握手 |
+| 配 `KEYS`、未开 `REQUIRED` | 没配 key | 仍走明文 ⇒ 这一档专门用于**分批升级**：先把服务端配好、逐个把 worker 换成配 key 的，最后再开强制 |
+| 开 `REQUIRED` | 没配 key | 明文被拒，返回 **`428`**（不是 401）+ 一张现领的 challenge。用 401 会让 SDK 把它当"票过期"无限重注册；客户端按提示一次往返即可改加密。worker 侧的报错直接指向 `worker.Config.AesKey` / `gojob.worker.aes-key`，不去怀疑口令 |
+| 配 `KEYS` | 配了另一把 key | 拒，并回 `unknown key id（服务端接受 <kids>）`——错配要说清楚是谁没对齐 |
+
+**配了 key 就一定加密**：即使服务端没启用，也是**注册失败 + 指出服务端没配**，不会静默退回明文。静默降级等于给链路上的中间人一个"抹掉加密"的开关（它只要挡掉 `/worker/challenge`）。所以升级顺序固定为：**先配服务端 → 再全量配 worker → 最后开强制**。
+
+`GOJOB_WORKER_AES_KEYS` 的运维等级与 `GOJOB_CLUSTER_SECRET` 相同：拿到即可自签注册包冒注任意 worker，轮换会让所有未同步的 worker 注册失败。因此**只放 env / flag，不进数据库、控制台也没有输入框**（服务端要能解密，就意味着库里那份是"知道即可冒用"的凭据等价物——与砍掉 `password_md5` 列同一个判断）。多把 key 只为轮换期并存，新旧 worker 可同时在线。
+
+边界（不粉饰）：
+
+- 它保护的是**口令这一个字段**的一次性传输。token、任务参数、实例参数、执行日志仍是 HTTP 明文内容；链路加密要靠内网或前置 TLS。
+- 挑战/密文本身仍会被看到。抓包者解不出口令，但**能知道"某个节点在某一刻注册过"**（`app_id`、`instance_id`、`kid` 是明文表头）。
+- 服务端只能凭"验不出合法 challenge"拒绝重放，做不到"识别出这是被重放的包"并告警。
+- 口令泄露一次（比如运维把它打进了别处日志）仍然等于该项目被冒名，之后只能改口令 + 重启 worker。
+
+跨语言口径由测试钉住：`internal/registercrypto` 的黄金向量（用 Node 的 OpenSSL 独立算出）同时被 Go 与 Java 单测断言，Java 侧还直接用 Go 产出的密文解密验证；两端 SDK 各自跑真进程的实机验收见 `scripts/verify-register-encryption.sh`（47 项，含强制档、重放、错配、Go/Java worker 上线）。
 
 ## 节点监控
 
-> 同样是 PowerJob 之上的**增强项**（PowerJob 控制台只有首页时间卡与项目下的 worker 机器表，没有进程级指标页）。入口：控制台「系统管理 → 节点监控」，接口 `GET /openapi/system/nodes`（`ADMIN` / `SUPER_ADMIN`）。
+> 同样是**自研能力**（兼容目标的控制台只有首页时间卡与项目下的 worker 机器表，没有进程级指标页）。入口：控制台「系统管理 → 节点监控」，接口 `GET /openapi/system/nodes`（`ADMIN` / `SUPER_ADMIN`）。
 
 **两张表，两条上报链路**
 
@@ -270,7 +335,7 @@ token 是**无状态签名票**（HMAC-SHA256，密钥 `GOJOB_CLUSTER_SECRET`）
 
 ## Server 集群（多副本）
 
-多个 `gojob-server` 进程可以指向同一套库横向铺开。归属模型对齐 PowerJob：**按项目（app）划分调度所有权**，同一时刻只有一个副本调度某个项目的全部任务（PowerJob 用 `app_info.current_server` 表达，gojob 用 `app_leases` 租约表达）。
+多个 `gojob-server` 进程可以指向同一套库横向铺开。归属模型：**按项目（app）划分调度所有权**，同一时刻只有一个副本调度某个项目的全部任务（兼容目标用 `app_info.current_server` 表达，gojob 用 `app_leases` 租约表达）。
 
 | 关注点 | gojob 的做法 | 代码 |
 | --- | --- | --- |
@@ -278,10 +343,10 @@ token 是**无状态签名票**（HMAC-SHA256，密钥 `GOJOB_CLUSTER_SECRET`）
 | 接管时延 | 显式可算：最坏 `TTL(10s) + 粗扫(5s)` ≈ 15s 发现，`lease` 一跳(3s) 内接管。优雅退出会主动把 `lease_expire` 写成当下，接管方不必等满 TTL | 同上 |
 | 僵尸主（分区后旧主仍在写） | 事务内 **fencing**：触发前先 `UPDATE app_leases SET renew_count=renew_count+1 WHERE app_id=? AND holder=? AND epoch=?`，`RowsAffected != 1` 即回滚本次触发。epoch **只在接管时 +1**，所以"换了主人"这件事永远看得出来 | `lease.go` `Fence` + `scheduler.fire` |
 | 装载与触发的三道防线 | ① 粗扫只装载本机持有的项目；② `UPDATE job_infos SET next_trigger_time=? WHERE id=? AND next_trigger_time=?` 的 CAS 让同一计划时刻只有一个副本能消费；③ 上面那道 epoch 围栏 | `server/scheduler/scheduler.go` |
-| 令牌跨副本 | 三类票（控制台 / worker 数据面 / PowerJob OpenAPI）都是 **HMAC-SHA256 无状态签名**，任一副本独立验签；吊销走库里的 `token_epoch` 基线 + `revoked_tokens` 单票黑名单 | `server/auth/` |
+| 令牌跨副本 | 三类票（控制台 / worker 数据面 / OpenAPI 兼容层）都是 **HMAC-SHA256 无状态签名**，任一副本独立验签；吊销走库里的 `token_epoch` 基线 + `revoked_tokens` 单票黑名单 | `server/auth/` |
 | Worker 在线节点 | 心跳 upsert 进 `worker_nodes` 表，所以**每个副本看到的候选集一致**（内存表时 LB 后面各副本只看得见轮询过自己的节点） | `server/registry/registry.go` |
 | 跨副本唤醒 | `cluster_signals` 单行计数器：入队/停止意图 `seq+1`，各副本 1s 轮询到变化就唤醒本机长轮询。把"别的副本入队 → 我这里的 worker 拿到任务"从最多 5s 压到最多 1s | `server/cluster/signal.go` |
-| Worker 连哪台副本 | **数据面不绑归属**：在线表在库里，所以 `/worker/*` 任何副本都能服务。心跳响应顺带下发 `cluster_hint`（`owner` = 该 app 租约持有者的可达地址，`servers` = 在线副本地址列表），worker 只把它当**首选地址**：连续 2 跳指向同一 owner 才迁移，迁过去连不上就退回列表里的其它副本继续跑。因此 worker 侧不需要 LB/VIP，配一份副本地址列表即可自寻址、自容错，且额外 QPS 为 0（PowerJob 要为此每 10s 单独发一次 `/server/acquire`） | `server/cluster/routing.go`、`worker/worker.go` `applyHint` |
+| Worker 连哪台副本 | **数据面不绑归属**：在线表在库里，所以 `/worker/*` 任何副本都能服务。心跳响应顺带下发 `cluster_hint`（`owner` = 该 app 租约持有者的可达地址，`servers` = 在线副本地址列表），worker 只把它当**首选地址**：连续 2 跳指向同一 owner 才迁移，迁过去连不上就退回列表里的其它副本继续跑。因此 worker 侧不需要 LB/VIP，配一份副本地址列表即可自寻址、自容错，且额外 QPS 为 0（兼容目标要为此每 10s 单独发一次 `/server/acquire`） | `server/cluster/routing.go`、`worker/worker.go` `applyHint` |
 
 **部署要点**
 
@@ -295,7 +360,7 @@ token 是**无状态签名票**（HMAC-SHA256，密钥 `GOJOB_CLUSTER_SECRET`）
 **边界（不粉饰）**
 
 - 归属只保证"一个计划时刻只生成一个实例"，不保证"同一时刻只有一个副本能写库"——围栏只覆盖触发这条写路径。管理面写操作（建任务/改任务）仍靠数据库行级约束，两个副本同时改同一行是后写覆盖。
-- 租约不是共识协议：没有 quorum，也就无法防"库里 `now()` 被时钟回拨"这类病态场景。PowerJob 同样没有（它的选举是先到先得 + 反向 PING 判活，且明确没有 fencing），gojob 用 TTL + epoch 把最常见的分区双跑堵死，不是做到严格一次。
+- 租约不是共识协议：没有 quorum，也就无法防"库里 `now()` 被时钟回拨"这类病态场景。兼容目标同样没有 fencing（它的选举是先到先得 + 反向 PING 判活），gojob 用 TTL + epoch 把最常见的分区双跑堵死，不是做到严格一次。
 - 集群密钥是**共享长期凭据**：拿到它就能自签任意身份的票（含 SUPER_ADMIN），必须与数据库口令同等对待；轮换会让所有在野令牌即刻失效（用户重登、worker 自动重注册）。
 - 入队信号是尽力而为：`Bump` 失败只记日志，最坏退化成长轮询自身的 ≤5s 兜底重查，不会丢任务。
 
@@ -316,6 +381,52 @@ token 是**无状态签名票**（HMAC-SHA256，密钥 `GOJOB_CLUSTER_SECRET`）
 
 注意边界：`life_cycle` 目前只能经 OpenAPI 设置，**建单表单里还没有这一项**（连同其余几处表单差距一起记在 `CHANGELOG.md` 的 `[Unreleased]` 一节）。
 
+## 容量实机数字
+
+"支持多少 worker"这种话不用纸面换算，用 `scripts/verify-capacity.sh` 压：一台机器上用 SDK 起 N 个**真** worker 节点（各自注册、各自换票、各自长轮询、各自回报，只有处理器什么都不做），任务是一个 `BROADCAST`（一份/节点），量"从发出触发请求到该节点任务开跑"的派发延迟。**这是单机的联合数字**——Server 与 N 个节点挤在同一台机器上抢同一批核，生产上它们分开部署时两侧都比这里宽裕。
+
+复现（macOS，10 核 / 24GB，sqlite 单文件 WAL；`NODES`/`ROUNDS`/`CONC`/`DSN` 可覆盖）：
+
+```
+NODES=200 ROUNDS=5 scripts/verify-capacity.sh
+```
+
+200 节点在线、一次广播 200 份，五轮全部 200/200 收齐：
+
+| 指标 | 实测 |
+| --- | --- |
+| 派发延迟 p50 | 59–69ms |
+| p90 | 90–99ms |
+| p99 | 101–138ms |
+| 单轮最大 | 114–152ms |
+| 一轮 200 份全部开跑 | 114–162ms |
+| 200 节点只挂机不触发 | Server 进程 CPU 3.7%、堆 14.1MB、协程 417、TCP 连接 200、长轮询在途 200 |
+| 节点全部断开后 | CPU 0.3%、协程 13–17 |
+
+同一台机器上 20 个节点时 p50 是 **5ms**、100 个节点时 **23ms**——延迟随节点数近乎线性，斜率约 **0.3ms/节点**（口径含管理面往返，脚本每轮会单独打出 `trigger_http`，要净派发延迟就减掉它）。
+
+**这条斜率就是瓶颈本身**：pull 模型下每份任务的认领都是一次写事务（`WAITING → RUNNING` 的条件 UPDATE），而 sqlite 只有一个写者，200 份任务只能排队过独木桥，0.3ms 就是单条写事务的排队成本。要把这段压下去，换 MySQL / PostgreSQL（行级锁，认领可并行），别改协议。
+
+**一个 worker 同时跑 200 个任务**：这取决于**每个节点自己的并发额度**，不是节点数。Go SDK `worker.Config.MaxConcurrency`（默认 **16**）、Java `maxConcurrency` / `gojob.worker.max-concurrency`、零代码节点 `GOJOB_AGENT_MAX_CONCURRENCY`。拉取时 SDK 把 `max_task_num` 报成"当时还剩多少额度"，服务端对这个数**没有上限**，所以一次长轮询的响应就能带回 200 条任务，`MaxConcurrency=200` 的节点当场起 200 个执行体。实测（同一个 Server、**1 个节点**、一个 `MAP` 实例派生 200 个子任务全落在这台节点上）：
+
+| 场景 | 并发额度 200 | 并发额度 16（默认） |
+| --- | --- | --- |
+| 只量派发（任务不做事） | p50 20–23ms，200 份全部开跑 62–134ms | 修复前 max **11–12s**，修复后 94–160ms |
+| 每个任务真跑 50ms | 200 份全部开跑 ≤30ms，整轮 74–88ms（串行要 10s） | 整轮 830–924ms ≈ 200/16 × 50ms |
+
+额度不是免费的：一个执行体一条回报。200 并发适合 IO 等待型任务；CPU 密集型的天花板是核数，额度开到核数以上只是把排队从服务端挪进进程里。Java 侧是固定大小线程池（`maxConcurrency` 条线程），Go 侧是信号量 + 每任务一条 goroutine，所以同样开 200，Go 节点便宜得多。
+
+复现：`NODES=1 CONC=200 SPLIT=200 EXEC=MAP ROUNDS=5 scripts/verify-capacity.sh`（`WORK=50` 给每个任务加 50ms 业务耗时）。
+
+已定位并修掉的四个坑（都在 200 这一档才暴露）：
+
+- **长轮询丢唤醒**：`Fetch` 原先先 `claim()` 再取唤醒 channel，两步之间到达的那次唤醒会被丢掉（channel 已被 close 并换掉），只能等 5s 兜底复查——表现为个别轮次里一整批任务统一迟到约 1 秒。现在先取 channel 再认领（close 过的 channel 永远可读，不会漏也不会多等）。
+- **心跳齐射**：心跳是 worker 侧唯一高频写库的请求。整池节点同时冷启动后相位一致，每 5s 一起写，实测把单条心跳 upsert 顶到 237–338ms（服务端 `SLOW SQL` 直接打出来了），同一条写通道上的任务认领被排到 1 秒开外。SDK 的心跳间隔现在带 ±25% 相位抖动（Go / Java 两侧同步改），齐射摊成匀速。
+- **满载时死睡 1 秒**：SDK 在"并发额度已满"时不发拉取，旧实现是固定睡 1 秒再看一眼 ⇒ 一台 16 额度的节点消化 200 条任务要白等 12 次秒级睡眠（实测整轮 11s）。改成**任务一释放额度就唤醒拉取循环**（1s 只留作兜底），同一场景降到 94–160ms；顺带让"额度占满时停止指令送达更慢"这条既有边界收紧了一档。Go / Java 两侧同改。
+- **注册风暴会永久吃掉节点**：注册是整链路唯一要过 bcrypt 的请求（200 次并发 ≈ 12 秒 CPU），本机 `kern.ipc.somaxconn=128`，队列一满后到的连接直接 reset。旧行为是 SDK 就此退出——那部分节点**永久不上线**，而其余节点跑得好好的，最难发现的一类故障。现在"连不上"退避重试（200ms/1s/2s/5s + 抖动，2 分钟止损），"服务端明确拒绝"（口令错、要求加密注册、服务端没配 key）仍然立即失败。实测每轮有 0–24 个节点靠重试补上线，最终 200/200。生产上请同时抬高内核 accept 队列（Linux `net.core.somaxconn`、`nginx`/SLB 的 backlog），注册风暴只在冷启动那一刻出现。
+
+还没吃掉的账：`wakeLocal` 会唤醒本进程**所有**长轮询（不分项目），单副本挂几千节点时一次触发会让所有节点各跑一次认领；每节点并发额度默认 16。这两项在 200 这一档都还没到压力点，暂不为此加复杂度。
+
 ## 连接池
 
 Server 启动即显式设置连接池，不留 `database/sql` 的默认（`MaxOpenConns=无限` + `MaxIdleConns=2`）——默认值意味着上千 worker 惊群拉单时会一路新建 TCP 连接，一路顶到 MySQL 的 `max_connections`（默认 151）后开始报错，同时把握手成本摊进请求延迟。
@@ -327,20 +438,22 @@ Server 启动即显式设置连接池，不留 `database/sql` 的默认（`MaxOp
 
 用 `GOJOB_DB_MAX_OPEN_CONNS` / `GOJOB_DB_MAX_IDLE_CONNS` / `GOJOB_DB_CONN_MAX_LIFETIME`（或同名 flag）调。多副本估算：**副本数 × 最大连接 ≤ 数据库 `max_connections` − 预留**（DBA 自己的连接、其他消费方）。3 副本 × 20 = 60，对默认 151 是安全的。数据库侧做过主备切换、或中间件会定期回收空闲连接时，把 `GOJOB_DB_CONN_MAX_LIFETIME` 调小（如 `5m`）能更快甩掉在野的陈旧连接。
 
-## 与 PowerJob 的差异
+## 兼容性说明
 
-- **Worker 数据面**：gojob 用自己的 HTTP 长轮询协议（`/worker/*`），不复刻 PowerJob Worker 的 Akka/PPTime 二进制协议。控制台、OpenAPI、任务/实例数据模型与字段对齐 PowerJob 4.x。数据面凭证也是自有设计：先 `register` 换 worker token，其余请求只带 token（PowerJob 是每次请求带密码），详见「Worker 数据面」节。**这是破坏性协议变更**：旧版只带口令的 worker 会被回 `401`，需升级到含自动注册的 Go/Java SDK。
-- **OpenAPI `authApp` 只接受明文口令（安全优先的刻意偏离）**：gojob 请求体为 `{appName, password}`，服务端用 bcrypt 校验；**不**支持 PowerJob 官方 SDK 的 `encryptedPassword=md5(明文)` + `encryptType=1` 形态，这类请求会被明确拒绝并提示原因。原因：校验 md5 摘要要求服务端存下同一份摘要，而 md5 值与明文等效（拿到即可冒用），等于库里存明文；gojob 选择只在库里保留 bcrypt 摘要。接入方需把客户端配成提交明文口令（并部署在内网 / 前置 TLS）。
+gojob 与 [PowerJob](https://github.com/PowerJob/PowerJob) **无隶属、无背书关系**，但控制面刻意与它的 4.x/5.x 接口语义对齐——既有的任务包、OpenAPI 调用方和运维习惯可以平移过来。下面逐条写清哪里对齐、哪里刻意偏离、为什么；下文把那个项目简称**兼容协议**。
+
+- **Worker 数据面**：gojob 用自己的 HTTP 长轮询协议（`/worker/*`），不复刻兼容协议 Worker 的 Akka/PPTime 二进制协议。控制台、OpenAPI、任务/实例数据模型与字段对齐兼容协议的 4.x。数据面凭证也是自有设计：先 `register` 换 worker token，其余请求只带 token（兼容协议是每次请求带口令），详见「Worker 数据面」节。**这是破坏性协议变更**：旧版只带口令的 worker 会被回 `401`，需升级到含自动注册的 Go/Java SDK。
+- **OpenAPI `authApp` 的口令形态（安全优先的刻意偏离）**：gojob 请求体为 `{appName, password}`，服务端用 bcrypt 校验；**不**支持兼容协议官方 SDK 的 `encryptedPassword=md5(明文)` + `encryptType=1` 形态，这类请求会被明确拒绝并提示原因。原因：校验 md5 摘要要求服务端存下同一份摘要，而 md5 值与明文等效（拿到即可冒用），等于库里存明文；gojob 选择只在库里保留 bcrypt 摘要。接入方把客户端配成提交明文口令即可（并部署在内网 / 前置 TLS）。另外 gojob 在这一层也提供自有的**加密握手**（`authScheme=aes-gcm` + `kid/iv/ciphertext/challenge`，见「注册口令加密」），不想让口令上线的调用方可以用它——它是 gojob 扩展，兼容协议客户端不会发这个字段，因此不影响既有明文接入。
 - **无工作流**：一期不支持 Workflow。任务间的前后依赖用轻量的**依赖触发**表达（见下条），不引入 DAG 引擎。
-- **依赖触发（gojob 扩展，时间类型 `DEPENDENCY`）**：任务的调度方式除 cron/频率/API 外，还可以是「等某个上游任务执行成功」，由 `job_info.upstream_job_id` 指定单个上游任务，上游实例**成功**收尾后自动为下游创建一个实例（`source=DEPENDENCY`、`job_instance.upstream_instance_id` 记录来源实例）。上游失败或被停止不传导；幂等靠 `(job_id, upstream_instance_id)` 唯一索引，回报重放/服务重启都不会重复拉起下游；保存期禁止自依赖、跨项目依赖与成环，且被依赖的上游任务不允许删除。PowerJob 用 Workflow(DAG) 表达同一需求，gojob 不实现 DAG，只做「单上游、成功即触发」这一最高频形态。
-- **执行类型 `BROADCAST` / `MAP` / `MAP_REDUCE` 已实现，语义对齐 PowerJob，实现位置不同**：PowerJob 把子任务树放在 TaskTracker 那台 worker 的**本地** `task_info` 表里，server 一行不落，控制台的实例详情是反向 ask 那台 worker 拿的；gojob 的 worker 之间不通信、而且是 pull 模型，所以子任务**落库**在 `instance_tasks`（`parent_task_id` 串成树），由 server 承担 TaskTracker 的角色。用户可见的语义保持一致：广播每台一份且**节点失联时那一份判失败、不换机重跑**（PowerJob issue #1003 同结论）；`MAP` 任一子任务最终失败即实例失败；`MAP_REDUCE` 由 reduce（保留名 `OMS_LAST_TASK`、层次号 `9999`）的返回值决定成败，因此开发者可以在 reduce 里容忍部分失败；`map()` 的保留任务名、结果 8096 字节截断、多级 map、`instance_num_limit` 等都按 PowerJob 口径实现。四处刻意偏离，都需要知道：① **reduce 不钉回根任务那台机器**（PowerJob 必须钉，因为结果在它本地表；我们的结果在库里，钉住等于多一个"那台机器挂了 reduce 永远没人跑"的失败模式）；② **广播的节点集合是触发那一刻的快照**，运行期新上线的节点不补（PowerJob 的 `WorkerDetector` 会补，但那等于实例开跑后再凭空多一份，对幂等敏感的处理器更危险）；③ 子任务负载是 **JSON**，不是 PowerJob 默认的 JDK 序列化——我们的 worker 池是 Go/Java 混布的，JDK 序列化的字节 Go 侧读不了；④ 每个实例都有一行根任务（广播的根建出来就是终态，只负责记录"广播了几台"），这样"一个实例一棵树"在所有执行类型下形状统一。附带好处：实例结束、worker 下线之后子任务树依然可查。
-- **`SHARDING` 不提供**：PowerJob 3.x 的分片执行在 4.x 起由 `MAP` 承担，gojob 直接只留 `MAP`；建单/导入/OpenAPI 遇到 `SHARDING` 会带原因拒绝并提示改用 `MAP`（`WORKFLOW` 同理，见上条「无工作流」）。控制台那个 `select * from task_info where … limit 10` 输入框照搬，但后端**不拼 SQL**：PowerJob 只有关键字黑名单、而且是在自己 worker 的本地库上执行，越权面比在共享库上小得多；gojob 换成只认白名单语法片的解析器，认不出来就在弹窗里给出可用写法，而不是让整个请求失败。
-- **脚本任务（Shell 已对齐，PYTHON 未实现）**：PowerJob 的 `processorType=SHELL/PYTHON` 在 5.x 早已 `@Deprecated`，且 worker 侧**没有任何 `ProcessorFactory` 支持它们**——官方脚本任务的正解是 `BUILT_IN` + 官方处理器的类全名 `tech.powerjob.official.processors.impl.script.ShellProcessor`。gojob 按这个口径实现：`cmd/gojob-agent` 注册该处理器（别名短名 `shell`），行为对齐 `AbstractScriptProcessor`（实例参数优先取参、落盘 `official_script_processor/shell_{instanceId}.sh`、`chmod 755`、`/bin/sh` 执行、stdout/stderr 逐行进任务日志），并加了 PowerJob 没有的一道白名单闸与进程组取消，详见 `worker/README.md`「零代码执行节点」。导入老 PowerJob 导出包时 `SHELL` 类型会被**自动改写**成 `BUILT_IN` + 官方脚本处理器（脚本正文搬进任务参数），因此既有任务能原样跑起来；`PYTHON` 与 `EXTERNAL`（JAR 动态容器，PowerJob 的 `容器ID#类名`）目前**明确拒绝**而不是静默入库成哑弹。处理器类型的控制台选项、占位文案与列表列均照搬 PowerJob 的 `BUILT_IN`（内建）/`EXTERNAL`（外置·动态加载）两值口径。
-- **分发策略**：`1/2/11`（健康优先/随机/指定机器）与 PowerJob `DispatchStrategy` 同值同算法；额外提供 **`21 ROUND_ROBIN`（轮询）——PowerJob 没有该策略**，属本项目自定义扩展，需严格轮流执行时才用。PowerJob 的 overload 过滤（`filterOverloadWorker`）未移植，pull 模型下由 worker 并发额度自然背压。
+- **依赖触发（gojob 扩展，时间类型 `DEPENDENCY`）**：任务的调度方式除 cron/频率/API 外，还可以是「等某个上游任务执行成功」，由 `job_info.upstream_job_id` 指定单个上游任务，上游实例**成功**收尾后自动为下游创建一个实例（`source=DEPENDENCY`、`job_instance.upstream_instance_id` 记录来源实例）。上游失败或被停止不传导；幂等靠 `(job_id, upstream_instance_id)` 唯一索引，回报重放/服务重启都不会重复拉起下游；保存期禁止自依赖、跨项目依赖与成环，且被依赖的上游任务不允许删除。兼容协议用 Workflow(DAG) 表达同一需求，gojob 不实现 DAG，只做「单上游、成功即触发」这一最高频形态。
+- **执行类型 `BROADCAST` / `MAP` / `MAP_REDUCE` 已实现，语义与兼容协议一致，实现位置不同**：兼容协议把子任务树放在 TaskTracker 那台 worker 的**本地** `task_info` 表里，server 一行不落，控制台的实例详情是反向 ask 那台 worker 拿的；gojob 的 worker 之间不通信、而且是 pull 模型，所以子任务**落库**在 `instance_tasks`（`parent_task_id` 串成树），由 server 承担 TaskTracker 的角色。用户可见的语义保持一致：广播每台一份且**节点失联时那一份判失败、不换机重跑**（兼容协议 issue #1003 同结论）；`MAP` 任一子任务最终失败即实例失败；`MAP_REDUCE` 由 reduce（保留名 `OMS_LAST_TASK`、层次号 `9999`）的返回值决定成败，因此开发者可以在 reduce 里容忍部分失败；`map()` 的保留任务名、结果 8096 字节截断、多级 map、`instance_num_limit` 等都按兼容协议口径实现。四处刻意偏离，都需要知道：① **reduce 不钉回根任务那台机器**（兼容协议必须钉，因为结果在它本地表；我们的结果在库里，钉住等于多一个"那台机器挂了 reduce 永远没人跑"的失败模式）；② **广播的节点集合是触发那一刻的快照**，运行期新上线的节点不补（兼容协议的 `WorkerDetector` 会补，但那等于实例开跑后再凭空多一份，对幂等敏感的处理器更危险）；③ 子任务负载是 **JSON**，不是 JDK 原生序列化——我们的 worker 池是 Go/Java 混布的，JDK 序列化的字节 Go 侧读不了；④ 每个实例都有一行根任务（广播的根建出来就是终态，只负责记录"广播了几台"），这样"一个实例一棵树"在所有执行类型下形状统一。附带好处：实例结束、worker 下线之后子任务树依然可查。
+- **`SHARDING` 不提供**：兼容协议 3.x 的分片执行在 4.x 起由 `MAP` 承担，gojob 直接只留 `MAP`；建单/导入/OpenAPI 遇到 `SHARDING` 会带原因拒绝并提示改用 `MAP`（`WORKFLOW` 同理，见上条「无工作流」）。控制台那个 `select * from task_info where … limit 10` 输入框照搬，但后端**不拼 SQL**：兼容协议只有关键字黑名单、而且是在自己 worker 的本地库上执行，越权面比在共享库上小得多；gojob 换成只认白名单语法片的解析器，认不出来就在弹窗里给出可用写法，而不是让整个请求失败。
+- **脚本任务（Shell 已对齐，PYTHON 未实现）**：兼容协议的 `processorType=SHELL/PYTHON` 在 5.x 早已 `@Deprecated`，且 worker 侧**没有任何 `ProcessorFactory` 支持它们**——官方脚本任务的正解是 `BUILT_IN` + 官方处理器的类全名 `tech.powerjob.official.processors.impl.script.ShellProcessor`。gojob 按这个口径实现：`cmd/gojob-agent` 注册该处理器（别名短名 `shell`），行为对齐 `AbstractScriptProcessor`（实例参数优先取参、落盘 `official_script_processor/shell_{instanceId}.sh`、`chmod 755`、`/bin/sh` 执行、stdout/stderr 逐行进任务日志），并加了兼容协议没有的一道白名单闸与进程组取消，详见 `worker/README.md`「零代码执行节点」。导入老版任务包时 `SHELL` 类型会被**自动改写**成 `BUILT_IN` + 官方脚本处理器（脚本正文搬进任务参数），因此既有任务能原样跑起来；`PYTHON` 与 `EXTERNAL`（JAR 动态容器，形如 `容器ID#类名`）目前**明确拒绝**而不是静默入库成哑弹。处理器类型的控制台选项、占位文案与列表列均沿用兼容协议的 `BUILT_IN`（内建）/`EXTERNAL`（外置·动态加载）两值口径。
+- **分发策略**：`1/2/11`（健康优先/随机/指定机器）与兼容协议 `DispatchStrategy` 同值同算法；额外提供 **`21 ROUND_ROBIN`（轮询）——兼容协议没有该策略**，属本项目自定义扩展，需严格轮流执行时才用。兼容协议的 overload 过滤（`filterOverloadWorker`）未移植，pull 模型下由 worker 并发额度自然背压。
 - **健康分指标**：心跳新增 `cpu_processors` / `memory_max` / `tag`。Linux（含容器）实测采集 cgroup 内存限额与 `/proc/loadavg`；Go 在 macOS/Windows 取不到机器内存与负载时报 0，健康分退化为「按已用内存排序」，Java SDK 用 JVM `-Xmx` 与 `getSystemLoadAverage()` 不受影响。
-- **多副本归属：租约 + fencing（刻意不照抄 PowerJob 的一处）**：PowerJob 用 `app_info.current_server` + 先到先得的选举表达归属（`ServerElectionService`），判活靠 worker 心跳反向 PING 旧主，并且**明确没有**防"网络分区后旧主仍在写"——它的锁是 JVM 本地的 `ReentrantLock`（`@UseCacheLock`），跨进程无效。gojob 归属同样按项目划分，但用带 TTL 的租约行（`app_leases`）判活、用 `holder + epoch` 的条件 UPDATE 挡僵尸主，代价是接管时延从"PING 到就换"变成"最多 TTL + 一跳"（≈13s），换来的是双跑在库里被堵死。
-- **归属的"下发方式"抄了 PowerJob，"承重方式"没抄**：gojob 也把调度归属副本的地址随心跳下发给 worker（`cluster_hint.owner`，语义等同 `current_server`），worker 据此把长轮询收敛到归属副本，省掉一次跨副本信号。差别在于它是**可选优化**：PowerJob 的 `current_server` 是唯一通路（server 主动 push），所以被迫配一整套续命机制——每 10s 一次的 `/server/acquire` 专用端点、每次发现都对 owner 发 RPC PING（其源码注释自陈"QPS 蛮爆表的"，只能靠 `oms.accurate.select.server.percentage` 抽样降压）、`server_elect_%d` 分布式锁抢主、连续 3 次找不到 owner 就**本地杀死秒级任务**。gojob 是 pull 模型 + 在线表落库，任何副本都能发活，因此以上五项一个都不需要，`owner` 提示给错或给不到都只是退化成一跳信号延迟（实测：故意把某副本的对外地址配成连不上的端口，任务照常触发与执行成功，无双跑）。
-- 控制台以 PowerJob 官方控制台为蓝本做 1:1 对齐，仅保留少量定制项（登录后统计总览落地页、项目列表用卡片布局、新增「系统管理 → 节点监控」页，见上节）。
+- **多副本归属：租约 + fencing（刻意不照抄兼容协议的一处）**：兼容协议用 `app_info.current_server` + 先到先得的选举表达归属（`ServerElectionService`），判活靠 worker 心跳反向 PING 旧主，并且**明确没有**防"网络分区后旧主仍在写"——它的锁是 JVM 本地的 `ReentrantLock`（`@UseCacheLock`），跨进程无效。gojob 归属同样按项目划分，但用带 TTL 的租约行（`app_leases`）判活、用 `holder + epoch` 的条件 UPDATE 挡僵尸主，代价是接管时延从"PING 到就换"变成"最多 TTL + 一跳"（≈13s），换来的是双跑在库里被堵死。
+- **归属的"下发方式"沿用兼容协议，"承重方式"没沿用**：gojob 也把调度归属副本的地址随心跳下发给 worker（`cluster_hint.owner`，语义等同 `current_server`），worker 据此把长轮询收敛到归属副本，省掉一次跨副本信号。差别在于它是**可选优化**：兼容协议的 `current_server` 是唯一通路（server 主动 push），所以被迫配一整套续命机制——每 10s 一次的 `/server/acquire` 专用端点、每次发现都对 owner 发 RPC PING（其源码注释自陈"QPS 蛮爆表的"，只能靠 `oms.accurate.select.server.percentage` 抽样降压）、`server_elect_%d` 分布式锁抢主、连续 3 次找不到 owner 就**本地杀死秒级任务**。gojob 是 pull 模型 + 在线表落库，任何副本都能发活，因此以上五项一个都不需要，`owner` 提示给错或给不到都只是退化成一跳信号延迟（实测：故意把某副本的对外地址配成连不上的端口，任务照常触发与执行成功，无双跑）。
+- 控制台的信息构成与交互沿用兼容协议官方控制台（1:1 对齐），仅保留少量定制项（登录后统计总览落地页、项目列表用卡片布局、新增「系统管理 → 节点监控」页，见上节）。
 
 ## 技术栈
 

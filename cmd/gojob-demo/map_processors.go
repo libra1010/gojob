@@ -24,7 +24,7 @@ func nodeID() string {
 	return fmt.Sprintf("%s-%d", host, os.Getpid())
 }
 
-// params 取本次执行的参数：实例参数优先（与 PowerJob 的 CommonUtils.parseParams 一致）。
+// params 取本次执行的参数：实例参数优先（与兼容协议的 CommonUtils.parseParams 一致）。
 func params(ctx *worker.TaskContext) string {
 	if strings.TrimSpace(ctx.InstanceParams) != "" {
 		return strings.TrimSpace(ctx.InstanceParams)
@@ -120,7 +120,7 @@ func (mapFailOne) Process(ctx *worker.TaskContext) error {
 	return nil
 }
 
-// deepMap 多级 Map：根任务拆成几组，每组再拆成几项。PowerJob 允许子任务继续 map，这里照做。
+// deepMap 多级 Map：根任务拆成几组，每组再拆成几项。兼容协议允许子任务继续 map，这里照做。
 // 参数格式：组数,每组项数。
 type deepMap struct{}
 

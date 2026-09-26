@@ -23,7 +23,7 @@ import (
 // ErrJobRunning 手动触发时任务仍在执行且开启了 SkipWhenRunning。
 var ErrJobRunning = errors.New("job is running and skip_when_running is enabled")
 
-// SecondOptional：同时支持标准 5 段 cron 与 PowerJob 风格的 6 段秒级表达式
+// SecondOptional：同时支持标准 5 段 cron 与兼容协议的 6 段秒级表达式风格
 var cronParser = cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour |
 	cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
 
@@ -38,12 +38,12 @@ func NextTime(expr string, from time.Time) (time.Time, error) {
 	return sch.Next(from), nil
 }
 
-// MaxFrequencyIntervalMs 对齐 PowerJob PowerJobDKey.FREQUENT_JOB_MAX_INTERVAL 默认值：
+// MaxFrequencyIntervalMs 取兼容协议配置项 FREQUENT_JOB_MAX_INTERVAL 的默认值：
 // 固定频率/固定延迟的最大周期（毫秒）。周期必须落在扫描窗口量级内才有意义，
-// 超过该上限的任务可能长时间不被粗扫装载，PowerJob 直接在保存阶段拒绝。
+// 超过该上限的任务可能长时间不被粗扫装载，兼容目标直接在保存阶段拒绝。
 const MaxFrequencyIntervalMs = 120_000
 
-// parseIntervalMs 解析 FIXED_RATE / FIXED_DELAY 的周期（毫秒），与 PowerJob 同语义。
+// parseIntervalMs 解析 FIXED_RATE / FIXED_DELAY 的周期（毫秒），与兼容协议同语义。
 func parseIntervalMs(typ, expr string) (int64, error) {
 	ms, err := strconv.ParseInt(strings.TrimSpace(expr), 10, 64)
 	if err != nil || ms <= 0 {
@@ -55,7 +55,7 @@ func parseIntervalMs(typ, expr string) (int64, error) {
 	return ms, nil
 }
 
-// NextByType 按时间表达式类型计算下一次触发时间，单位与 PowerJob 一致（毫秒）。
+// NextByType 按时间表达式类型计算下一次触发时间，单位与兼容协议一致（毫秒）。
 //   - CRON：解析 cron 求 next
 //   - FIXED_RATE：next = 上次计划时间 base + 周期(ms)，等间隔不累积漂移；
 //     若已落后当前时间则从 now 重算，避免宕机后疯狂追补
@@ -139,7 +139,7 @@ func Preview(typ, expr string, now time.Time, count int) ([]time.Time, error) {
 }
 
 // 粗扫周期：每次装载 [now, now+scanWindow) 内到期的任务进时间轮。
-// 与 PowerJob 的 15s 扫描同理——扫描只决定"何时被装载"，
+// 与兼容协议的 15s 扫描同理——扫描只决定"何时被装载"，
 // 实际触发时刻由时间轮按 next_trigger_time 精确到 tickSize。
 const scanInterval = 5 * time.Second
 
@@ -229,7 +229,7 @@ func (s *Scheduler) scan() {
 	now := store.Now()
 	q := s.st.DB.Where("enable = ? AND next_trigger_time <= ?", true, now.Add(scanInterval))
 	// 只装载本机归属的项目——这是集群下"一次触发只有一个副本生成实例"的结构性保证，
-	// 与 PowerJob 的 "select id from AppInfoDO where currentServer = :currentServer" 同构。
+	// 与兼容协议的 "select id from AppInfoDO where currentServer = :currentServer" 同构。
 	if s.leases != nil {
 		owned := s.leases.Owned()
 		if len(owned) == 0 {
@@ -372,7 +372,7 @@ var ErrTriggerTaken = errors.New("scheduler: trigger taken by another server")
 //     RowsAffected==0 → 整个事务回滚，绝不产生第二个实例。这道防线与归属无关，
 //     哪怕两个副本都以为自己是对的，也只有一个能把这个时刻消费掉；
 //  3. 租约 fencing：事务内条件确认 (holder, epoch) 仍是本机，挡住"租约早过期但进程还活着"
-//     的僵尸主。PowerJob 对这个场景（网络分区后旧主仍在调度）没有防护。
+//     的僵尸主。兼容协议里没有这个防护（网络分区后旧主仍在调度）。
 //
 // 手动触发（API）与依赖触发不在任何副本独占的时间轴上——一次请求就是一次事实，
 // 所以既不推进计划时间也不参与 fencing，任何副本都能执行。
@@ -385,7 +385,7 @@ func (s *Scheduler) fire(job *store.JobInfo, next time.Time, source, instancePar
 		target = s.pick(job)
 	}
 	// 广播的落点集合同样是入队那一刻的快照：之后新上线的节点不会补到这一份广播
-	// （PowerJob 的 WorkerDetector 会在运行期补，但那是"实例已经开跑后再凭空多一份"，
+	// （兼容协议的 WorkerDetector 会在运行期补，但那是"实例已经开跑后再凭空多一份"，
 	// 对幂等敏感的处理器更危险，这里选择更保守的形态并如实记进文档）。
 	var broadcast []string
 	if job.ExecuteType == protocol.ExecuteBroadcast && s.fanout != nil {
@@ -472,7 +472,7 @@ func (s *Scheduler) fire(job *store.JobInfo, next time.Time, source, instancePar
 			LogLevel:     logLevel,
 			DispatchTime: now, CreateTime: now, ModifyTime: now,
 		}
-		// 广播的根任务不派给任何 worker：PowerJob 里它只跑 preProcess，真正的活是"每台一份"
+		// 广播的根任务不派给任何 worker：兼容协议里它只跑 preProcess，真正的活是"每台一份"
 		// 的子任务。gojob 的处理器没有 preProcess 这一层，所以根任务建出来就是终态，
 		// 它存在的意义是让"一个实例一棵树"这个形状在所有执行类型下统一。
 		if execType == protocol.ExecuteBroadcast {
@@ -536,7 +536,7 @@ func (s *Scheduler) TriggerManually(job *store.JobInfo) error {
 	return err
 }
 
-// TriggerRun PowerJob runJob 语义：带运行时参数触发一次，返回新实例 ID。
+// TriggerRun 与兼容协议的 runJob 语义一致：带运行时参数触发一次，返回新实例 ID。
 func (s *Scheduler) TriggerRun(job *store.JobInfo, instanceParams string) (uint64, error) {
 	_, id, err := s.fire(job, job.NextTriggerTime, "API", instanceParams, 0)
 	return id, err

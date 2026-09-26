@@ -10,7 +10,7 @@
 CREATE DATABASE IF NOT EXISTS gojob DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
 USE gojob;
 
--- 应用（PowerJob 语义中的 namespace/app）
+-- 应用（兼容协议语义中的 namespace/app）
 CREATE TABLE IF NOT EXISTS app_infos (
   id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   app_id      VARCHAR(64)  NOT NULL,
@@ -73,7 +73,8 @@ CREATE TABLE IF NOT EXISTS cluster_signals (
   modify_time DATETIME(3) NULL
 ) ENGINE = InnoDB;
 
--- 登出黑名单：无状态会话票无法凭内存作废单张，退出登录落这张小表（随票过期，由维护循环清理）
+-- 已消费 jti 表：① 登出黑名单（无状态会话票无法凭内存作废单张）② 一次性注册 challenge 的消费记录
+-- （主键冲突即"已用过"，跨副本生效）。随对应票过期，由维护循环清理
 CREATE TABLE IF NOT EXISTS revoked_tokens (
   jti       VARCHAR(64) NOT NULL PRIMARY KEY,
   purpose   VARCHAR(16) NOT NULL DEFAULT '',
@@ -165,12 +166,12 @@ CREATE TABLE IF NOT EXISTS job_infos (
   job_name           VARCHAR(128) NOT NULL DEFAULT '',
   processor          VARCHAR(128) NOT NULL DEFAULT '',
   job_description    VARCHAR(256) NOT NULL DEFAULT '',
-  processor_type     VARCHAR(32)  NOT NULL DEFAULT 'BUILT_IN',   -- PowerJob ProcessorType：BUILT_IN/EXTERNAL（SHELL/PYTHON 已废弃，导入时改写）
+  processor_type     VARCHAR(32)  NOT NULL DEFAULT 'BUILT_IN',   -- 兼容协议 ProcessorType：BUILT_IN/EXTERNAL（SHELL/PYTHON 已废弃，导入时改写）
   execute_type       VARCHAR(16)  NOT NULL DEFAULT 'STANDALONE',
   time_expression_type VARCHAR(24) NOT NULL DEFAULT 'CRON',       -- CRON/FIXED_RATE/FIXED_DELAY/DAILY_TIME_INTERVAL/API/WORKFLOW/DEPENDENCY(依赖触发,gojob 扩展)
   time_expression    VARCHAR(64)  NOT NULL DEFAULT '',
   job_params         TEXT,
-  instance_params    TEXT,                                     -- 运行时固定参数（PowerJob instanceParams）
+  instance_params    TEXT,                                     -- 运行时固定参数（兼容协议 instanceParams）
   max_retry_times    INT          NOT NULL DEFAULT 3,
   instance_retry_num INT          NOT NULL DEFAULT 3,
   concurrency        INT          NOT NULL DEFAULT 5,
@@ -205,7 +206,7 @@ CREATE TABLE IF NOT EXISTS job_instances (
   status          VARCHAR(16)  NOT NULL DEFAULT '',  -- WAITING/RUNNING/STOPPING/STOPPED/SUCCEED/FAILED
   fixed_params    TEXT,                              -- runJob instanceParams
   execute_type    VARCHAR(16)  NOT NULL DEFAULT 'STANDALONE', -- 建单时从 job_infos 抄：一实例一任务还是一棵任务树
-  result          TEXT,                              -- 实例级结果（PowerJob InstanceInfoDO.result）：reduce 或根任务的返回值
+  result          TEXT,                              -- 实例级结果（兼容协议 InstanceInfoDO.result）：reduce 或根任务的返回值
   running_times   INT          NOT NULL DEFAULT 0,   -- 未结束任务数
   try_times       INT          NOT NULL DEFAULT 0,
   total_task_num  INT          NOT NULL DEFAULT 0,
@@ -235,7 +236,7 @@ CREATE TABLE IF NOT EXISTS instance_tasks (
   worker_id     VARCHAR(64)  NOT NULL DEFAULT '',  -- 认领该任务的 worker
   target_worker_id VARCHAR(64) NOT NULL DEFAULT '', -- 分发策略预选机器，空=任意在线节点可认领
   -- 多任务执行类型（BROADCAST/MAP/MAP_REDUCE）：一个实例是一棵树，根任务 parent_task_id=0。
-  -- PowerJob 把这些行放在 TaskTracker 节点的本地 task_info 表里，gojob 落库（pull 模型下 worker 不互访）。
+  -- 兼容协议把这些行放在 TaskTracker 节点的本地 task_info 表里，gojob 落库（pull 模型下 worker 不互访）。
   parent_task_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
   map_batch   INT          NOT NULL DEFAULT 0,      -- 父任务第几次调 map
   map_attempt INT          NOT NULL DEFAULT 0,      -- 与 (parent_task_id, map_batch) 一起构成派生幂等键
