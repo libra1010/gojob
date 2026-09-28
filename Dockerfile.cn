@@ -40,7 +40,7 @@ RUN adduser -D -u 10001 gojob
 WORKDIR /app
 COPY --from=build /out/app /app/${BUILD_TARGET}
 USER gojob
-EXPOSE 7700 7799 7800
+EXPOSE 7700
 # 与 Dockerfile 同一条决定：镜像里刻意不写 HEALTHCHECK（三个 target 端口不同，写了会让
 # demo/agent 容器恒为 unhealthy）。健康检查归编排层管，见 docker-compose.yml。
 ENTRYPOINT ["/app/${BUILD_TARGET}"]

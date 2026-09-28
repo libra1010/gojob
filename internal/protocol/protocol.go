@@ -127,6 +127,7 @@ type WorkerInfo struct {
 	Threads      int     `json:"threads"`       // goroutine 数 / JVM 线程数
 	OpenFDs      int     `json:"open_fds"`      // 打开的 fd（含 socket）
 	RunningTasks int     `json:"running_tasks"` // 正在执行的任务数（=并发额度占用）
+
 }
 
 type HeartbeatReq struct {
@@ -493,6 +494,14 @@ type ModifyAppReq struct {
 
 type DeleteAppReq struct {
 	AppId string `json:"app_id"`
+}
+
+// SetWorkerAcceptReq 管理面翻某台 worker 的接单开关（true=恢复接单，false=不再拉新任务）。
+// 语义边界：在跑的任务不受影响，继续执行并回报；只是不再派新任务给它。
+type SetWorkerAcceptReq struct {
+	AppId      string `json:"app_id"`
+	InstanceId string `json:"instance_id"`
+	Accept     bool   `json:"accept"`
 }
 
 type DeleteJobReq struct {

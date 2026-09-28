@@ -207,14 +207,14 @@ psql -U postgres < scripts/ddl/postgres.sql
 | `GOJOB_DB_MAX_OPEN_CONNS` | `-db-max-open-conns` | mysql/pg 20 · sqlite 10 | 数据库连接上限。不设等于无限，worker 惊群拉单时会一路新建连接并顶到 MySQL 默认 `max_connections=151`。多副本估算见下 |
 | `GOJOB_DB_MAX_IDLE_CONNS` | `-db-max-idle-conns` | 跟随上面的最大值 | 空闲连接保留数 |
 
-Worker 侧示例进程读取：`GOJOB_WORKER_SERVER` / `GOJOB_WORKER_APP` / `GOJOB_WORKER_PASSWORD` / `GOJOB_WORKER_DRAIN_ADDR`，以及 `GOJOB_WORKER_AES_KEY`（与服务端某一把 key 一致即可，两侧只配 key、不配 kid）。零代码执行节点 `gojob-agent` 另有 `GOJOB_AGENT_*` 六个变量（脚本库、内联开关、并发、工作目录、超时、下线端点），清单与安全含义见 `worker/README.md`「零代码执行节点」与 `.env.example`。
+Worker 侧示例进程读取：`GOJOB_WORKER_SERVER` / `GOJOB_WORKER_APP` / `GOJOB_WORKER_PASSWORD`，以及 `GOJOB_WORKER_AES_KEY`（与服务端某一把 key 一致即可，两侧只配 key、不配 kid）。零代码执行节点 `gojob-agent` 另有 `GOJOB_AGENT_*` 六个变量（脚本库、内联开关、并发、工作目录、超时），清单与安全含义见 `worker/README.md`「零代码执行节点」与 `.env.example`。
 
 ## API 概览
 
 三组接口，均返回 `{code, message, data}`（`code=0` 为成功）。
 
 **控制台 `/openapi/*`**（除 login 外需 `X-Gojob-Token` 头）
-`user/{login,logout,me,changePassword,list,create,modify,resetPassword,status,delete}` · `app/{create,modify,delete,list,workers}`（`app/list` 每行带 `current_server` = 当前调度该项目的副本 `node_id`，列名沿用兼容协议的 currentServer） · `job/{create,modify,delete,get,list,operate,import,export,previewTime}`（`job/list` = `index`(0 基) + `page_size` + `job_id` + `keyword`，返回 `PageResult`；`job/export` 回通用任务包（JobDTO 数组/对象）；`job/operate` 的 `trigger` 可带 `instance_params`＝参数运行） · `instance/{list,get,tasks,logs,stop,detailPlus}`（`detailPlus` = 实例详情弹窗：实例行 + `Task 统计` + 一页子任务，`custom_query` 只认白名单语法） · `stats/overview` · `audit/{loginLogs,operationLogs}` · `system/nodes`（节点监控：副本指标 + worker 指标 + 项目调度归属表，`ADMIN`/`SUPER_ADMIN`）
+`user/{login,logout,me,changePassword,list,create,modify,resetPassword,status,delete}` · `app/{create,modify,delete,list,workers}` · `worker/acceptTasks`（停/启某台节点接单，见「停止某台节点接单」）（`app/list` 每行带 `current_server` = 当前调度该项目的副本 `node_id`，列名沿用兼容协议的 currentServer） · `job/{create,modify,delete,get,list,operate,import,export,previewTime}`（`job/list` = `index`(0 基) + `page_size` + `job_id` + `keyword`，返回 `PageResult`；`job/export` 回通用任务包（JobDTO 数组/对象）；`job/operate` 的 `trigger` 可带 `instance_params`＝参数运行） · `instance/{list,get,tasks,logs,stop,detailPlus}`（`detailPlus` = 实例详情弹窗：实例行 + `Task 统计` + 一页子任务，`custom_query` 只认白名单语法） · `stats/overview` · `audit/{loginLogs,operationLogs}` · `system/nodes`（节点监控：副本指标 + worker 指标 + 项目调度归属表，`ADMIN`/`SUPER_ADMIN`）
 
 **Worker 数据面 `/worker/*`**（gojob 自有协议，gojob SDK 使用）
 `register`（用 `app_id + password` 换取 worker token，**数据面唯一需要口令的端点**；配了注册加密后口令改由 `challenge + kid + iv + ciphertext` 送上）· `challenge`（注册握手第一步：领一张 30s 过期、用过即废的凭证，未启用加密时明确拒绝）· `heartbeat` `fetchTask`（长轮询认领）`report`（回报，幂等）`reportLogs`（批量日志，去重）`mapTask`（`MAP`/`MAP_REDUCE` 的处理器运行期派生子任务）`taskResults`（reduce 分页取回子任务结果）——除 `register`/`challenge` 外这六个只带 token，不再携带项目口令。`mapTask` 与 `report` 同样校验任务归属（只有正在执行该任务的节点能为它派生/改判），`fetchTask` 与 `heartbeat` 的响应携带 `cancel_task_ids`：pull 模型没有反向连接，停止实例等下行指令只能靠响应夹带下发。
@@ -332,6 +332,19 @@ token 是**无状态签名票**（HMAC-SHA256，密钥 `GOJOB_CLUSTER_SECRET`）
 - 取不到的指标报 0，页面渲染成"—"，**不猜数**：RSS 与 `open_fds` 依赖 Linux 的 `/proc`，macOS/Windows 本地开发恒为"—"；JVM 没有可移植的 per-process RSS 取法，Java worker 的 RSS 恒为"—"。
 - 曲线只存在 `server_nodes.samples` 这一 TEXT 列里（按列存稀疏数值），是"最近 10 分钟"级别的趋势，不是时序库；要长期留存/告警请抓 `/openapi/system/nodes` 或接 Prometheus（未实现，见 roadmap）。
 - Server 指标是**进程级**，不含机器级视角（整机 CPU/磁盘/网络）；worker 侧另有 `cpu_load`/`memory_*` 表达机器与额度。
+
+## 停止某台节点接单
+
+入口：控制台「项目 → 节点」每一行的「停止接单 / 恢复接单」，接口 `POST /openapi/worker/acceptTasks`（`{app_id, instance_id, accept}`）。走控制台会话票 + 该项目写权限 + 操作审计，与"停止实例"是两个不同的动作。
+
+实现就是 `worker_nodes.accept_tasks` 这一列改成 0，生效靠**选节点时过滤**：`registry.Workers` 只返回接单中的节点，所以随机/健康优先/轮询选不到它，广播的节点集合快照也只数它。**worker 侧零改动、也不感知这个开关**（没有新的协议字段，Java SDK 同样不动）：那台节点继续心跳与长轮询，只是认领 SQL 永远筛不到属于它的任务，于是一直空转到超时。
+
+- 在跑的任务不受影响，继续执行并回报；已经在队列里但指名给它的任务，由 `ReleaseStaleTargets`（60s）回收后重选节点；
+- 开关在库里，所以**重启 Server 副本、请求打到别的副本、点的时候这台节点正好没心跳**都不会让它溜过去；
+- 全部节点都停接单时任务留在队列里等运维恢复，而不是被判成"没有 worker 可用"直接失败（`HasWorkers` 数的是在线节点，不看开关）；
+- 业务进程自己要下线，用 SDK 的 `worker.StopReceivingNewTasks()` / Ctrl-C 优雅退出，**不需要也不应该有一个对外开口的端口**。
+
+> 实机数字（同一项目 3 个在线节点、停掉其中 1 台）：广播一次得到 `广播 2 个执行节点`，那 2 份子任务分别落在另外两台身上，被停的那台一份都没拿到；恢复接单后再触发一次，回到 `广播 3 个执行节点`。停掉之后让它再跳两跳心跳（10s），`accept_tasks` 仍是 0——心跳的 upsert 里不含这一列，运维的意图不会被 worker 自己刷回去（`server/registry/registry_test.go` 有这条回归）。
 
 ## Server 集群（多副本）
 

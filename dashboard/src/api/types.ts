@@ -138,6 +138,14 @@ export interface WorkerInfo {
   running_tasks: number
 }
 
+/** /app/workers 返回的是节点快照：心跳自报的指标 + 服务端这一侧的开关与判活 */
+export interface WorkerNodeView extends WorkerInfo {
+  last_heartbeat: string
+  alive: boolean
+  /** 管理面开关。false=已停止接单：新任务不再派给它，在跑的照常执行并回报 */
+  accept_tasks: boolean
+}
+
 // ---------- 节点监控 ----------
 
 /** server_nodes.samples 列：按列存的采样序列，前端直接喂给 sparkline */

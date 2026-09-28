@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS worker_nodes (
   threads        INT          NOT NULL DEFAULT 0,
   open_fds       INT          NOT NULL DEFAULT 0,
   running_tasks  INT          NOT NULL DEFAULT 0,
+  accept_tasks   TINYINT(1)   NOT NULL DEFAULT 1,  -- 0=控制台已停止接单；选节点只看 1（worker 侧不感知）
   last_heartbeat DATETIME(3)  NULL,
   create_time    DATETIME(3)  NULL,
   modify_time    DATETIME(3)  NULL,

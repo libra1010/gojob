@@ -204,7 +204,7 @@ want_txt "未知 scheme 被明确拒绝" "unknown auth_scheme" "$(wreg "$BODY")"
 echo "== 6. Go SDK 真客户端：配了 key 就不再上链路传口令"
 DLOG=$WORK/go-worker.log
 GOJOB_WORKER_SERVER=$BASE GOJOB_WORKER_APP=$APP GOJOB_WORKER_PASSWORD=$PW \
-GOJOB_WORKER_AES_KEY=$KEY GOJOB_WORKER_DRAIN_ADDR=127.0.0.1:7895 \
+GOJOB_WORKER_AES_KEY=$KEY \
   "$DEMOBIN" -tag enc >"$DLOG" 2>&1 &
 PIDS+=($!)
 if wait_online '"tag":"enc"'; then ok "Go worker 以加密注册上线"; else bad "Go worker 没上线：$(tail -5 "$DLOG")"; fi
@@ -236,7 +236,7 @@ want_code "这张 challenge 同样只用一次" 401 "$(wreg "$(sealed f1 "$KEY" 
 # 没配 key 的 worker 在强制档下应当启动即失败，并把原因说清楚
 NWLOG=$WORK/go-worker-nokey.log
 GOJOB_WORKER_SERVER=$BASE GOJOB_WORKER_APP=$APP GOJOB_WORKER_PASSWORD=$PW \
-GOJOB_WORKER_DRAIN_ADDR=127.0.0.1:7896 "$DEMOBIN" -tag nokey >"$NWLOG" 2>&1 &
+"$DEMOBIN" -tag nokey >"$NWLOG" 2>&1 &
 wait $! 2>/dev/null
 want_log "没配 key 的 worker 注册失败并指向 worker.Config.AesKey" "AesKey" "$NWLOG"
 

@@ -98,6 +98,8 @@ func (s *Server) authorize() gin.HandlerFunc {
 	appScoped := map[string]bool{
 		"/openapi/job/create": true, "/openapi/job/modify": true, "/openapi/job/delete": true,
 		"/openapi/job/operate": true,
+		// 停/启某台 worker 接单：app_id 直接来自请求体，同样是项目级授权范围
+		"/openapi/worker/acceptTasks": true,
 	}
 	return func(c *gin.Context) {
 		path := c.FullPath()

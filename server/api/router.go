@@ -95,6 +95,7 @@ func (s *Server) Router(mid ...gin.HandlerFunc) *gin.Engine {
 		admin.POST("/app/delete", s.deleteApp)
 		admin.GET("/app/list", s.listApps)
 		admin.GET("/app/workers", s.listWorkers)
+		admin.POST("/worker/acceptTasks", s.setWorkerAccept) // 停/启某台 worker 拉新任务（写库，心跳下发）
 
 		admin.POST("/job/create", s.createJob)
 		admin.POST("/job/modify", s.modifyJob)

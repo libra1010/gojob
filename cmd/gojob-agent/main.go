@@ -1,5 +1,8 @@
 // gojob-agent：零代码的通用执行节点。不写 Go 代码，配好项目口令与脚本库就能领任务跑脚本。
 //
+// 这个进程不监听任何端口。要让它停止收单：Ctrl-C 走优雅下线（在跑的任务执行完并回报），
+// 或者在控制台「节点 → 停止接单」上改那一台节点的库字段（服务端不再把新任务派给它）。
+//
 //	GOJOB_WORKER_SERVER=http://127.0.0.1:7700 GOJOB_WORKER_APP=demo_app \
 //	GOJOB_WORKER_PASSWORD=demo123 GOJOB_AGENT_SCRIPT_DIR=/srv/gojob/scripts \
 //	gojob-agent
@@ -15,9 +18,7 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -95,8 +96,6 @@ func main() {
 		"内联脚本的工作目录，默认 {user.home}/gojob/agent")
 	timeout := flag.Duration("script-timeout", envDuration("GOJOB_AGENT_SCRIPT_TIMEOUT", 0),
 		"单次脚本执行上限，0=不限（仍可被控制台的停止指令打断）")
-	drainAddr := flag.String("drain-addr", envOr("GOJOB_AGENT_DRAIN_ADDR", ":7800"),
-		"本机优雅下线端点：POST /drain 停止收单、POST /resume 恢复")
 	flag.Parse()
 
 	if *password == "" {
@@ -138,20 +137,6 @@ func main() {
 	})
 	log.Printf("执行节点启动：app=%s 脚本库=%s 允许内联脚本=%t 单次上限=%s 并发=%d tag=%s",
 		*appId, orNA(*scripts), *inline, orUnlimited(*timeout), *concurrency, *tag)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /drain", func(rw http.ResponseWriter, _ *http.Request) {
-		w.StopReceivingNewTasks()
-		fmt.Fprintf(rw, "receiving=%v\n", w.IsReceiving())
-	})
-	mux.HandleFunc("POST /resume", func(rw http.ResponseWriter, _ *http.Request) {
-		w.ResumeReceivingNewTasks()
-		fmt.Fprintf(rw, "receiving=%v\n", w.IsReceiving())
-	})
-	go func() {
-		log.Printf("drain endpoint on %s", *drainAddr)
-		_ = http.ListenAndServe(*drainAddr, mux)
-	}()
 
 	if err := w.Run(ctx); err != nil {
 		log.Fatal(err)

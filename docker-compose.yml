@@ -140,9 +140,6 @@ services:
       GOJOB_WORKER_PASSWORD: ${GOJOB_DEMO_APP_PASSWORD:-demo123}
       # 与服务端 GOJOB_WORKER_AES_KEYS 之一一致；配了它口令不再明文上链路
       GOJOB_WORKER_AES_KEY: ${GOJOB_WORKER_AES_KEY:-}
-      GOJOB_WORKER_DRAIN_ADDR: ":7799"
-    ports:
-      - "7799:7799"   # POST /drain /resume 优雅下线演示
     restart: unless-stopped
     depends_on:
       gojob-server:
@@ -178,7 +175,6 @@ services:
       GOJOB_AGENT_MAX_CONCURRENCY: ${GOJOB_AGENT_MAX_CONCURRENCY:-8}
       GOJOB_AGENT_SCRIPT_TIMEOUT: ${GOJOB_AGENT_SCRIPT_TIMEOUT:-0}
       GOJOB_AGENT_WORKSPACE: /var/lib/gojob/agent
-      GOJOB_AGENT_DRAIN_ADDR: ":7800"
       # 给它打个 tag，任务用 SPECIFY + tagEquals:executor 才能把脚本只派到这台节点
       GOJOB_WORKER_TAG: ${GOJOB_AGENT_TAG:-executor}
     volumes:

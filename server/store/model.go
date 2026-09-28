@@ -43,19 +43,25 @@ type WorkerNode struct {
 	Address    string  `gorm:"size:128" json:"address"`
 	CpuLoad    float64 `json:"cpu_load"`
 	// 以下数值列同样不加 default 标签（见 ServerNode 注释）：0 都是合法读数。
-	CpuProcessors int       `json:"cpu_processors"`
-	MemoryUsed    float64   `json:"memory_used"`
-	MemoryMax     float64   `json:"memory_max"`
-	Tag           string    `gorm:"size:128" json:"tag"`
-	Version       string    `gorm:"size:64" json:"version"`
-	SdkType       string    `gorm:"size:32" json:"sdk_type"`
-	CpuPercent    float64   `json:"cpu_percent"`
-	GcCount       int64     `json:"gc_count"`
-	GcPauseMs     float64   `json:"gc_pause_ms"`
-	RssMb         float64   `json:"rss_mb"`
-	Threads       int       `json:"threads"`
-	OpenFDs       int       `gorm:"column:open_fds" json:"open_fds"` // 显式列名：gorm 会把 OpenFDs 切成 open_f_ds
-	RunningTasks  int       `json:"running_tasks"`
+	CpuProcessors int     `json:"cpu_processors"`
+	MemoryUsed    float64 `json:"memory_used"`
+	MemoryMax     float64 `json:"memory_max"`
+	Tag           string  `gorm:"size:128" json:"tag"`
+	Version       string  `gorm:"size:64" json:"version"`
+	SdkType       string  `gorm:"size:32" json:"sdk_type"`
+	CpuPercent    float64 `json:"cpu_percent"`
+	GcCount       int64   `json:"gc_count"`
+	GcPauseMs     float64 `json:"gc_pause_ms"`
+	RssMb         float64 `json:"rss_mb"`
+	Threads       int     `json:"threads"`
+	OpenFDs       int     `gorm:"column:open_fds" json:"open_fds"` // 显式列名：gorm 会把 OpenFDs 切成 open_f_ds
+	RunningTasks  int     `json:"running_tasks"`
+	// AcceptTasks = 这个节点当前是否接收新任务。只有控制台的按钮会写它。
+	// 选节点只看它=1 的节点，所以停接单不会让在跑的任务失败，只是不再派新任务给它。
+	// 这一列要 default:true（与上面那些"0 也是合法读数"的指标列相反）：存量行必须被认成接单中。
+	// worker 侧完全不知道这个开关的存在（不需要协议字段）：它照常长轮询，
+	// 只是认领 SQL 永远筛不到属于它的任务，于是空转到超时。
+	AcceptTasks   bool      `gorm:"default:true" json:"accept_tasks"`
 	LastHeartbeat time.Time `gorm:"index" json:"last_heartbeat"`
 	CreateTime    time.Time `json:"create_time"`
 	ModifyTime    time.Time `json:"modify_time"`

@@ -137,7 +137,7 @@ start_worker() {
   local i=$1 app=$2 pw=$3 servers=$4
   local log=$WORK/w$i.log
   GOJOB_WORKER_APP=$app GOJOB_WORKER_PASSWORD=$pw GOJOB_WORKER_SERVER=$servers \
-  GOJOB_WORKER_DRAIN_ADDR=:$((7870+i)) "$WBIN" >"$log" 2>&1 &
+  "$WBIN" >"$log" 2>&1 &
   PIDS+=($!)
   WLOG[$i]=$log
 }

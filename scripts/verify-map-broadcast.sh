@@ -30,8 +30,6 @@ APP=$APP_MAIN
 DEAD_APP=${DEAD_APP:-mb_empty} # 只有项目、没有任何在线节点的项目，用来演广播落在零台机器上
 PW=${PW:-mb123}
 SECRET=${SECRET:-map-broadcast-secret}
-W1_DRAIN=:7892
-W2_DRAIN=:7893
 WORK=$(mktemp -d)
 DB=$WORK/mb.db
 SBIN=$WORK/gojob-server
@@ -187,13 +185,13 @@ BODY=$(printf '{"app_id":"%s","app_name":"没有节点的验收项目","password
 [ "$(jget "$(api "$BASE" /openapi/app/create -H 'Content-Type: application/json' -d "$BODY")" "root['code']")" = "0" ] &&
   ok "创建空项目 $DEAD_APP" || bad "创建空项目 $DEAD_APP 失败"
 
-start_worker() { # start_worker <drain 端口> <日志文件>
+start_worker() { # start_worker <日志文件>
   ( GOJOB_WORKER_SERVER=$BASE GOJOB_WORKER_APP=$APP GOJOB_WORKER_PASSWORD=$PW \
-      GOJOB_WORKER_DRAIN_ADDR=$1 "$WBIN" >>"$2" 2>&1 &
-    echo $! >"$2.pid" )
+      "$WBIN" >>"$1" 2>&1 &
+    echo $! >"$1.pid" )
 }
-start_worker "$W1_DRAIN" "$W1_LOG"
-start_worker "$W2_DRAIN" "$W2_LOG"
+start_worker "$W1_LOG"
+start_worker "$W2_LOG"
 sleep 7 # 两跳心跳：注册与在线节点都落库了，广播才知道该派给谁
 NODES=$(online_ids)
 eq "两个 worker 都上线" "2" "$(printf '%s' "$NODES" | wc -w | tr -d ' ')"
@@ -220,6 +218,53 @@ eq "根任务建出来就是终态" "SUCCEED" "$(tcalc "$I" "[t for t in ts if t
 contains "实例结果写明广播了几台" "广播 2 个执行节点" "$(inst_field "$I" result)"
 eq "实例任务总数含根任务" "3" "$(inst_field "$I" total_task_num)"
 eq "收敛后不留未结束任务" "0" "$(inst_field "$I" running_times)"
+
+echo
+echo "== 2.5 控制台停掉一台节点的接单：广播的份数立刻少一台，且 worker 刷不回去"
+# 「停止接单」就是 worker_nodes.accept_tasks 这一个字段，生效靠选节点时过滤：
+# 被停的节点照常心跳/长轮询，只是认领 SQL 筛不到属于它的任务。
+# 这一节要钉住三件事：① 停掉之后广播少一份；② 那台节点的心跳不能把开关刷回 1
+# （在线表每 5s upsert 一次，若 accept_tasks 进了覆盖列，运维刚点的开关会被 worker 自己抹掉）；
+# ③ 项目口令换来的兼容层票据调不到这个接口——它是管理面动作，只认控制台会话票。
+DRAINED=$(printf '%s' "$NODES" | cut -d' ' -f1)
+KEEP=$(printf '%s' "$NODES" | cut -d' ' -f2)
+drain() { # drain <true|false> —— 翻被停那台节点的开关，回响应信封
+  BODY=$(printf '{"app_id":"%s","instance_id":"%s","accept":%s}' "$APP_MAIN" "$DRAINED" "$1")
+  api "$BASE" /openapi/worker/acceptTasks -H 'Content-Type: application/json' -d "$BODY"
+}
+accepted() { # accepted <instance_id> —— 该节点当前的接单开关（列表接口读回来）
+  api_get "$BASE" "/openapi/app/workers?app_id=$APP_MAIN" | python3 -c "
+import sys,json
+want='$1'
+for w in json.load(sys.stdin)['data'] or []:
+    if w['instance_id'] == want: print(w['accept_tasks'])
+"
+}
+CODE=$(jget "$(drain false)" "root['code']"); eq "停止接单成功" "0" "$CODE"
+eq "节点列表里它还在（否则开关点不回来）" "2" "$(printf '%s' "$NODES" | wc -w | tr -d ' ')"
+eq "它被标成已停止接单" "False" "$(accepted "$DRAINED")"
+sleep 11 # 让它自己再跳两跳心跳
+eq "两跳心跳之后仍是停止接单" "False" "$(accepted "$DRAINED")"
+I25=$(run bc); settle "$I25" 240 >/dev/null
+eq "广播只发给还在接单的那一台" "1" \
+  "$(tcalc "$I25" "len([t for t in ts if t['task_name']=='OMS_BROADCAST_TASK'])")"
+eq "被停的那台一份都没拿到" "False" \
+  "$(tcalc "$I25" "any(t.get('worker_id')=='$DRAINED' for t in ts)")"
+eq "拿到那一份的是没被停的那台" "$KEEP" \
+  "$(tcalc "$I25" "[t['worker_id'] for t in ts if t['task_name']=='OMS_BROADCAST_TASK'][0]")"
+contains "结果里如实说明只广播了 1 台" "广播 1 个执行节点" "$(inst_field "$I25" result)"
+# 错误码在响应体的 code 里（HTTP 恒 200），所以读 body
+PJT=$(curl -s -m5 -X POST $BASE/openApi/authApp -H 'Content-Type: application/json' \
+  -d "{\"appName\":\"$APP_MAIN\",\"password\":\"$PW\"}" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+BODY=$(printf '{"app_id":"%s","instance_id":"%s","accept":true}' "$APP_MAIN" "$DRAINED")
+CODE=$(curl -s -m5 -X POST "$BASE/openapi/worker/acceptTasks" -H "X-GoJob-Token: $PJT" \
+  -H 'Content-Type: application/json' -d "$BODY" | sed -n 's/.*"code":\([0-9]*\).*/\1/p')
+eq "项目口令的票据调不到停止接单" "401" "$CODE"
+CODE=$(jget "$(drain true)" "root['code']"); eq "恢复接单成功" "0" "$CODE"
+eq "开关翻回接单中" "True" "$(accepted "$DRAINED")"
+I26=$(run bc); settle "$I26" 240 >/dev/null
+eq "恢复之后广播回到两份" "2" \
+  "$(tcalc "$I26" "len([t for t in ts if t['task_name']=='OMS_BROADCAST_TASK'])")"
 
 echo
 echo "== 3. BROADCAST 落在零个在线节点上：当场收敛，不挂死"

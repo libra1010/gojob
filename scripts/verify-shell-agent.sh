@@ -212,7 +212,7 @@ want_code=$(jget "$(api "$BASE" /openapi/app/create -H 'Content-Type: applicatio
 start_agent() { # start_agent [额外环境变量赋值，形如 A=1 B=2]
   # shellcheck disable=SC2086
   ( env GOJOB_WORKER_SERVER=$BASE GOJOB_WORKER_APP=$APP GOJOB_WORKER_PASSWORD=$PW \
-      GOJOB_WORKER_TAG=executor GOJOB_AGENT_SCRIPT_DIR=$LIB GOJOB_AGENT_DRAIN_ADDR=:7882 \
+      GOJOB_WORKER_TAG=executor GOJOB_AGENT_SCRIPT_DIR=$LIB \
       GOJOB_AGENT_MAX_CONCURRENCY=4 $1 "$ABIN" >>"$AGENT_LOG" 2>&1 &
     echo $! >"$AGENT_PID_FILE" )
 }
@@ -259,7 +259,7 @@ echo
 echo "== 5. SPECIFY 标签定向：脚本只落在 agent 上"
 # 这里才把普通 demo worker 拉起来：它没有脚本处理器、但注册了 hello
 ( GOJOB_WORKER_SERVER=$BASE GOJOB_WORKER_APP=$APP GOJOB_WORKER_PASSWORD=$PW \
-  GOJOB_WORKER_DRAIN_ADDR=:7883 "$WBIN" >"$WORKER_LOG" 2>&1 &
+  "$WBIN" >"$WORKER_LOG" 2>&1 &
   echo $! >"$WORK/worker.pid" )
 sleep 7
 mkjob specify shell "ok.sh routed" "$TAGGED" >/dev/null

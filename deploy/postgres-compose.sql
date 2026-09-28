@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS worker_nodes (
   threads        INTEGER NOT NULL DEFAULT 0,
   open_fds       INTEGER NOT NULL DEFAULT 0,
   running_tasks  INTEGER NOT NULL DEFAULT 0,
+  accept_tasks   BOOLEAN NOT NULL DEFAULT TRUE,  -- FALSE=已停止接单；选节点只看 TRUE
   last_heartbeat TIMESTAMPTZ(3) NULL,
   create_time    TIMESTAMPTZ(3) NULL,
   modify_time    TIMESTAMPTZ(3) NULL,

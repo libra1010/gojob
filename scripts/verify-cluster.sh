@@ -216,7 +216,7 @@ if [ -z "$OWNER" ]; then
 else
   # worker 只连"不是归属方"的那个副本：入队方与发任务方必然是两个进程
   GOJOB_WORKER_SERVER=$SUCCER GOJOB_WORKER_APP=$APP GOJOB_WORKER_PASSWORD=$PW \
-  GOJOB_WORKER_DRAIN_ADDR=:7799 $GO run ./cmd/gojob-demo >"$WORK/worker.log" 2>&1 &
+  $GO run ./cmd/gojob-demo >"$WORK/worker.log" 2>&1 &
   PIDS+=($!)
   ready=0
   i=0

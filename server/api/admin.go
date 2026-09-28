@@ -128,7 +128,36 @@ func (s *Server) listWorkers(c *gin.Context) {
 		writeErr(c, protocol.CodeBadReq, "app_id required")
 		return
 	}
-	writeOK(c, s.reg.Workers(appId))
+	// 含已停止接单的节点：抽屉里要能看到"这台停了"，否则开关点不回来。
+	writeOK(c, s.reg.AliveNodes(appId))
+}
+
+// setWorkerAccept 管理面停/启某台 worker 的接单：改的就是在线节点表里那一个字段，
+// 生效靠选节点时的过滤（见 registry.Workers）。
+//
+// 这里刻意**不**开任何到 worker 的反向 HTTP 调用：pull 模型下服务端没有到 worker 的连接，
+// 而"worker 自己监听一个不带凭证的端口等别人来停它"已经把泄露面变成整池节点的可用性了
+// （原先 demo/agent 上的 /drain 就是这个形状，已删；业务进程要优雅下线请用 SDK 的
+// worker.StopReceivingNewTasks()，那是本机自己的决定，不该对外开口）。
+func (s *Server) setWorkerAccept(c *gin.Context) {
+	req, err := bind[protocol.SetWorkerAcceptReq](c)
+	if err != nil || req.AppId == "" || req.InstanceId == "" {
+		writeErr(c, protocol.CodeBadReq, "bad request: app_id and instance_id required")
+		return
+	}
+	n, err := s.reg.SetAccept(req.AppId, req.InstanceId, req.Accept)
+	if err != nil {
+		writeErr(c, protocol.CodeErr, err.Error())
+		return
+	}
+	if n == 0 {
+		writeErr(c, protocol.CodeNotFound, "worker node not found: "+req.AppId+"/"+req.InstanceId)
+		return
+	}
+	// 审计中间件已经把这条写操作落进 operation_logs，这里只留运维轨迹。
+	log.Printf("worker %s/%s accept_tasks=%v（在跑任务不受影响，新派发的广播/派发会绕开它）",
+		req.AppId, req.InstanceId, req.Accept)
+	writeOK(c, struct{}{})
 }
 
 // ---------- Job 修改 / 删除 ----------

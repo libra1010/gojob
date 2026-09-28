@@ -157,6 +157,8 @@ w.ResumeReceivingNewTasks() // 需要时可恢复收单
 
 `ctx` 取消时 `Run` 会：停止收单 → 等在跑任务执行并回报完毕（drain）→ 最后 flush 日志通道，保证下线不丢日志与结果。
 
+**这两个方法是给业务进程自己调的，worker 不监听任何端口。** 以前 demo/agent 上各开过一个 `POST /drain` 让运维从网络侧翻这个开关，那是错的形状：一个不带凭证就能停节点的口子，等于把整池 worker 的可用性暴露在同一网段上（挨个点就能把集群打停）。现在从管理面停某台节点的收单，走控制台「项目 → 节点 → 停止接单」（`POST /openapi/worker/acceptTasks`，需要控制台会话票 + 该项目写权限 + 落操作审计），实现只是把 `worker_nodes.accept_tasks` 改成 0——**worker 侧不需要任何改动，也不感知这个开关**：它照常心跳和长轮询，只是选节点时被过滤掉，认领不到属于它的任务。
+
 ## 被服务端停止（单任务取消）
 
 控制台/OpenAPI 停止实例时，Server 把 `cancel_task_ids` 夹带在 `fetchTask` 与 `heartbeat` 的响应里；SDK 为每个任务维护 `context.WithCancel`，收到指令即取消该任务的 ctx，并回报终态 `STOPPED`（不计失败、不重试）。
@@ -241,7 +243,6 @@ GOJOB_WORKER_SERVER=http://127.0.0.1:7700 GOJOB_WORKER_APP=demo_app \
 | `GOJOB_AGENT_MAX_CONCURRENCY` | `-concurrency` | `8` | 同时执行的脚本数 |
 | `GOJOB_AGENT_WORKSPACE` | `-script-workspace` | `{home}/gojob/agent` | 内联脚本的落盘工作目录 |
 | `GOJOB_AGENT_SCRIPT_TIMEOUT` | `-script-timeout` | `0`（不限） | 单脚本超时，超时杀**整个进程组** |
-| `GOJOB_AGENT_DRAIN_ADDR` | `-drain-addr` | `:7800` | 优雅下线端点，`POST /drain` 停止领新任务、`POST /resume` 撤销 |
 
 两者都没配（既无脚本库也没开内联）时进程**直接拒绝启动**——一个什么都执行不了的 agent 留着只会让人误以为任务在跑。
 
