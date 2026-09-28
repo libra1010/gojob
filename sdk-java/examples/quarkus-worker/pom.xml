@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.gojob</groupId>
+    <artifactId>gojob-worker-parent</artifactId>
+    <version>0.2.0</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>quarkus-worker</artifactId>
+  <packaging>jar</packaging>
+
+  <name>quarkus-worker (example)</name>
+  <description>
+    Quarkus usage example for the gojob Java worker SDK: CDI lifecycle beans
+    (@Observes StartupEvent/ShutdownEvent) create, start and drain a GoJobWorker.
+    Compile-only demo (quarkus-arc + quarkus-core); add quarkus-maven-plugin and the
+    Quarkus platform BOM in a real application to run it with `quarkus:dev`.
+  </description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.gojob</groupId>
+      <artifactId>gojob-worker-core</artifactId>
+    </dependency>
+    <!-- CDI 容器 + StartupEvent/ShutdownEvent：真实 Quarkus 依赖（仅编译演示用） -->
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-arc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-core</artifactId>
+    </dependency>
+  </dependencies>
+</project>

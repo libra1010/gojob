@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.gojob</groupId>
+    <artifactId>gojob-worker-parent</artifactId>
+    <version>0.2.0</version>
+  </parent>
+
+  <artifactId>gojob-worker-spring-boot-starter</artifactId>
+  <packaging>jar</packaging>
+
+  <name>gojob-worker-spring-boot-starter</name>
+  <description>Spring Boot 3 auto-configuration for the gojob Java worker SDK.</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.gojob</groupId>
+      <artifactId>gojob-worker-core</artifactId>
+    </dependency>
+
+    <!-- Spring 依赖 provided：starter 编译需要，运行时由宿主 Boot 应用自带，core 保持零框架依赖 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-autoconfigure</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-configuration-processor</artifactId>
+      <scope>provided</scope>
+      <optional>true</optional>
+    </dependency>
+  </dependencies>
+</project>

@@ -1,0 +1,204 @@
+# gojob 一键安装体验：
+#   cp .env.example .env                                  # 按需修改
+#   docker compose up -d                                  # 零依赖（sqlite）
+#   docker compose --profile mysql    up -d               # MySQL 后端
+#   docker compose --profile postgres up -d               # PostgreSQL 后端
+#   GOJOB_SCRIPT_LIB=./scripts-lib docker compose --profile agent up -d
+#                                                         # 零代码脚本节点（默认不起，见下）
+#   打开 http://localhost:8080  （admin / admin123）
+#
+# docker.io 拉不动的机器（国内）用镜像版 Dockerfile 构建：基础镜像换成华为云 SWR 的搬运
+# 副本、构建期模块代理走 goproxy.cn。三个 Go 服务共用同一个开关，默认仍是 Dockerfile：
+#   GOJOB_DOCKERFILE=Dockerfile.cn docker compose up -d --build
+# 注意这只覆盖**我们自己那三个镜像**；mysql / postgres / curlimages 是上游镜像，
+# 要换源得各自改 image 行（或配 docker daemon 的 registry-mirrors）。
+#
+# 多副本：compose 默认只起一个 server。要跑多个副本，把后端换成
+# mysql/postgres（sqlite 卷不能跨容器共享），给所有副本配同一个 GOJOB_CLUSTER_SECRET，
+# 并给每个副本配一份"worker 打得通"的 GOJOB_PUBLIC_URL（宿主机地址 + 各自映射的端口）：
+#   GOJOB_CLUSTER_SECRET=$(openssl rand -hex 32) docker compose --profile mysql up -d --scale gojob-server=3
+# worker 侧不再需要反代：把各副本地址写进 ServerAddresses 即可自寻址并跟随 owner；
+# 只有 dashboard 还需要一个稳定入口（浏览器不能故障转移），继续走 nginx 反代到服务名。
+# 副本归属与接管语义见 README「Server 集群（多副本）」；实机验收脚本：
+# scripts/verify-cluster.sh（归属/接管/僵尸主）、scripts/verify-owner-routing.sh（owner 路由，2 副本 × 10 worker）。
+name: gojob
+
+services:
+  gojob-server:
+    build:
+      context: .
+      dockerfile: ${GOJOB_DOCKERFILE:-Dockerfile}
+      args:
+        BUILD_TARGET: gojob-server
+        GOJOB_VERSION: ${GOJOB_VERSION:-dev}
+    image: gojob/gojob-server:latest
+    command: ["/app/gojob-server"]
+    ports:
+      - "7700:7700"
+    environment:
+      GOJOB_ADDR: ":7700"
+      GOJOB_DB_DRIVER: ${GOJOB_DB_DRIVER:-sqlite}
+      GOJOB_DB_DSN: ${GOJOB_DB_DSN:-/app/data/gojob.db}
+      GOJOB_ADMIN_USER: ${GOJOB_ADMIN_USER:-admin}
+      GOJOB_ADMIN_PASSWORD: ${GOJOB_ADMIN_PASSWORD:-admin123}
+      GOJOB_PUBLIC_URL: ${GOJOB_PUBLIC_URL:-http://localhost:7700}
+      # 多副本部署时必须显式设为同一个值；compose 默认单副本，留空即可
+      GOJOB_CLUSTER_SECRET: ${GOJOB_CLUSTER_SECRET:-}
+      # 注册口令加密（口令不再明文上链路）。留空=不启用；多副本必须各节点配同一套。
+      # 见 README「注册口令加密」与 .env.example 的说明。
+      GOJOB_WORKER_AES_KEYS: ${GOJOB_WORKER_AES_KEYS:-}
+      GOJOB_WORKER_AES_REQUIRED: ${GOJOB_WORKER_AES_REQUIRED:-false}
+      # 历史实例保留天数。compose 默认给 30 天——容器化部署通常是长期运行的调度中心，
+      # 三张历史表不清理迟早拖慢热路径。想按任务单独控制就配 0，改在任务的 life_cycle 上。
+      GOJOB_RETENTION_DAYS: ${GOJOB_RETENTION_DAYS:-30}
+      GOJOB_DB_MAX_OPEN_CONNS: ${GOJOB_DB_MAX_OPEN_CONNS:-}
+      GOJOB_DB_MAX_IDLE_CONNS: ${GOJOB_DB_MAX_IDLE_CONNS:-}
+      GOJOB_DB_CONN_MAX_LIFETIME: ${GOJOB_DB_CONN_MAX_LIFETIME:-}
+    volumes:
+      - gojob-sqlite:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7700/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+        required: false
+      postgres:
+        condition: service_healthy
+        required: false
+
+  mysql:
+    image: mysql:8.4
+    profiles: [mysql]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${GOJOB_MYSQL_ROOT_PASSWORD:-root123}
+      MYSQL_DATABASE: gojob
+      MYSQL_USER: gojob
+      MYSQL_PASSWORD: ${GOJOB_MYSQL_PASSWORD:-gojob123}
+    volumes:
+      - gojob-mysql:/var/lib/mysql
+      # 模拟安装：入口镜像会执行该脚本预建表（与 server AutoMigrate 结果一致，二者幂等共存）
+      - ./scripts/ddl/mysql.sql:/docker-entrypoint-initdb.d/10-gojob.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "gojob", "-p${GOJOB_MYSQL_PASSWORD:-gojob123}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    ports:
+      - "3306:3306"
+
+  postgres:
+    image: postgres:17-alpine
+    profiles: [postgres]
+    environment:
+      POSTGRES_DB: gojob
+      POSTGRES_USER: gojob
+      POSTGRES_PASSWORD: ${GOJOB_PG_PASSWORD:-gojob123}
+    volumes:
+      - gojob-pg:/var/lib/postgresql/data
+      # 模拟安装：compose 场景下库由镜像 env 创建，这里只建表
+      - ./deploy/postgres-compose.sql:/docker-entrypoint-initdb.d/10-gojob.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gojob -d gojob"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    ports:
+      - "5432:5432"
+
+  # 一次性任务：等待 server 就绪后创建 demo_app（幂等）
+  init-demo:
+    image: curlimages/curl:8.10.1
+    entrypoint: ["/bin/sh", "/init.sh"]
+    volumes:
+      - ./deploy/init-demo-app.sh:/init.sh:ro
+    environment:
+      GOJOB_BASE: http://gojob-server:7700
+      GOJOB_ADMIN_USER: ${GOJOB_ADMIN_USER:-admin}
+      GOJOB_ADMIN_PASSWORD: ${GOJOB_ADMIN_PASSWORD:-admin123}
+      GOJOB_DEMO_APP_ID: demo_app
+      GOJOB_DEMO_APP_PASSWORD: ${GOJOB_DEMO_APP_PASSWORD:-demo123}
+    depends_on:
+      gojob-server:
+        condition: service_healthy
+
+  # demo worker：演示 Go SDK（真实业务方把 worker SDK 嵌入自己的进程）
+  gojob-demo:
+    build:
+      context: .
+      dockerfile: ${GOJOB_DOCKERFILE:-Dockerfile}
+      args:
+        BUILD_TARGET: gojob-demo
+    image: gojob/gojob-demo:latest
+    command: ["/app/gojob-demo"]
+    environment:
+      GOJOB_WORKER_SERVER: http://gojob-server:7700
+      GOJOB_WORKER_APP: ${GOJOB_DEMO_APP_ID:-demo_app}
+      GOJOB_WORKER_PASSWORD: ${GOJOB_DEMO_APP_PASSWORD:-demo123}
+      # 与服务端 GOJOB_WORKER_AES_KEYS 之一一致；配了它口令不再明文上链路
+      GOJOB_WORKER_AES_KEY: ${GOJOB_WORKER_AES_KEY:-}
+    restart: unless-stopped
+    depends_on:
+      gojob-server:
+        condition: service_healthy
+      init-demo:
+        condition: service_completed_successfully
+
+  # 零代码脚本执行节点 gojob-agent：不写代码、把脚本丢进脚本库就能被调度。
+  # **刻意挂在 agent profile 后面，默认不启动**：这个进程会执行脚本库里放进来的一切内容，
+  # 拿到项目口令或集群密钥的人＝能在它所在的主机上执行命令。只部署到隔离网段、
+  # 单独一台机/单独一个节点池，不要和调度中心或业务 worker 混部。
+  #   GOJOB_SCRIPT_LIB=./scripts-lib docker compose --profile agent up -d
+  gojob-agent:
+    profiles: ["agent"]
+    build:
+      context: .
+      dockerfile: ${GOJOB_DOCKERFILE:-Dockerfile}
+      args:
+        BUILD_TARGET: gojob-agent
+        GOJOB_VERSION: ${GOJOB_VERSION:-dev}
+    image: gojob/gojob-agent:latest
+    command: ["/app/gojob-agent"]
+    environment:
+      GOJOB_WORKER_SERVER: http://gojob-server:7700
+      GOJOB_WORKER_APP: ${GOJOB_DEMO_APP_ID:-demo_app}
+      GOJOB_WORKER_PASSWORD: ${GOJOB_DEMO_APP_PASSWORD:-demo123}
+      # 与服务端 GOJOB_WORKER_AES_KEYS 之一一致；执行节点能跑命令，口令更不该上线
+      GOJOB_WORKER_AES_KEY: ${GOJOB_WORKER_AES_KEY:-}
+      # 白名单目录：任务参数只给裸文件名时到这里找，越界路径直接拒。留空则拒绝启动。
+      GOJOB_AGENT_SCRIPT_DIR: ${GOJOB_SCRIPT_LIB:-/opt/gojob/scripts}
+      # 内联脚本文本（任务参数里直接放一段 shell）默认被拒，开了才执行，且启动时打 WARNING
+      GOJOB_AGENT_ALLOW_INLINE_SCRIPTS: ${GOJOB_AGENT_ALLOW_INLINE_SCRIPTS:-false}
+      GOJOB_AGENT_MAX_CONCURRENCY: ${GOJOB_AGENT_MAX_CONCURRENCY:-8}
+      GOJOB_AGENT_SCRIPT_TIMEOUT: ${GOJOB_AGENT_SCRIPT_TIMEOUT:-0}
+      GOJOB_AGENT_WORKSPACE: /var/lib/gojob/agent
+      # 给它打个 tag，任务用 SPECIFY + tagEquals:executor 才能把脚本只派到这台节点
+      GOJOB_WORKER_TAG: ${GOJOB_AGENT_TAG:-executor}
+    volumes:
+      - ${GOJOB_SCRIPT_LIB:-./scripts-lib}:/opt/gojob/scripts:ro
+      - gojob-agent-workspace:/var/lib/gojob/agent
+    restart: unless-stopped
+    depends_on:
+      gojob-server:
+        condition: service_healthy
+
+  dashboard:
+    build: ./dashboard
+    image: gojob/dashboard:latest
+    ports:
+      - "8080:80"
+    environment:
+      GOJOB_UPSTREAM: http://gojob-server:7700
+    restart: unless-stopped
+    depends_on:
+      gojob-server:
+        condition: service_healthy
+
+volumes:
+  gojob-sqlite:
+  gojob-mysql:
+  gojob-pg:
+  gojob-agent-workspace:
