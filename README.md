@@ -70,6 +70,7 @@ docker compose up -d          # 默认 sqlite，起 server + demo worker + dashb
 docker compose --profile mysql up -d
 # 使用 PostgreSQL：
 docker compose --profile postgres up -d
+# 切换数据库还要在 .env 里指定驱动与 DSN（格式见「数据库 DSN 格式」）
 # 再加一个零代码脚本节点（默认不起，安全含义见 worker/README）：
 GOJOB_SCRIPT_LIB=./scripts-lib docker compose --profile agent up -d
 ```
@@ -146,7 +147,7 @@ func main() {
 
 ## 数据库初始化
 
-- **SQLite**：无需脚本，Server 启动时 gorm `AutoMigrate` 自动建表（DSN 需带 `_txlock=immediate`，见下）。
+- **SQLite**：无需脚本，Server 启动时 gorm `AutoMigrate` 自动建表（WAL、`busy_timeout`、`_txlock=immediate` 由 Server 自动追加，见「数据库 DSN 格式」）。
 - **MySQL**：`scripts/ddl/mysql.sql`
 - **PostgreSQL**：`scripts/ddl/postgres.sql`（compose 场景由 `deploy/postgres-compose.sql` 自动执行）
 
@@ -194,7 +195,7 @@ psql -U postgres < scripts/ddl/postgres.sql
 | --- | --- | --- | --- |
 | `GOJOB_ADDR` | `-addr` | `:7800` | HTTP 监听地址 |
 | `GOJOB_DB_DRIVER` | `-driver` | `sqlite` | `sqlite` \| `mysql` \| `postgres` |
-| `GOJOB_DB_DSN` | `-dsn` | `./gojob.db` | 各驱动的 DSN |
+| `GOJOB_DB_DSN` | `-dsn` | `./gojob.db` | 各驱动的 DSN，格式见下「数据库 DSN 格式」 |
 | `GOJOB_ADMIN_USER` | — | `admin` | 首次启动播种的管理员（仅 `user_infos` 为空时） |
 | `GOJOB_ADMIN_PASSWORD` | — | `admin123` | 管理员密码（bcrypt 存储） |
 | `GOJOB_PUBLIC_URL` | `-public-url` | 自动推导 | 本副本的**对外可达地址**：随心跳下发给 worker 作为长轮询目标（`cluster_hint`），同时在统计总览页展示。留空按监听地址推导（`0.0.0.0` 会换成本机出口 IP）；多副本部署时每副本各填自己"worker 打得通"的地址 |
@@ -206,6 +207,21 @@ psql -U postgres < scripts/ddl/postgres.sql
 | `GOJOB_RETENTION_DAYS` | `-retention-days` | 空 → 永不清理 | **历史实例保留天数**（运维必配）。终态实例超过它就连同子任务、任务日志一起删；两边都不配则三张历史表只增不减。见「数据保留与容量」 |
 | `GOJOB_DB_MAX_OPEN_CONNS` | `-db-max-open-conns` | mysql/pg 20 · sqlite 10 | 数据库连接上限。不设等于无限，worker 惊群拉单时会一路新建连接并顶到 MySQL 默认 `max_connections=151`。多副本估算见下 |
 | `GOJOB_DB_MAX_IDLE_CONNS` | `-db-max-idle-conns` | 跟随上面的最大值 | 空闲连接保留数 |
+
+### 数据库 DSN 格式
+
+`-driver` 决定 DSN 怎么解析，三种驱动写法不能混用：
+
+| 驱动 | DSN 示例 |
+| --- | --- |
+| `sqlite` | `./gojob.db`（文件路径，不存在会自动创建；整段 DSN 里没有 `_pragma` 时 Server 自动补 `busy_timeout(5000)`、WAL、`_txlock=immediate`，自己写就要三项写全） |
+| `mysql` | `gojob:gojob123@tcp(127.0.0.1:3306)/gojob?charset=utf8mb4&parseTime=True&loc=Local` |
+| `postgres` | `postgres://gojob:gojob123@127.0.0.1:5432/gojob?sslmode=disable`，或关键字写法 `host=127.0.0.1 port=5432 user=gojob password=gojob123 dbname=gojob sslmode=disable` |
+
+- MySQL 必须带 `parseTime=True`，否则 `DATETIME` 读不回 `time.Time`；链路加密加 `tls=true` 或 `tls=skip-verify`。
+- PostgreSQL 本机/容器内用 `sslmode=disable`，托管库按服务商要求用 `require` / `verify-full`；URL 写法里口令含特殊字符要先百分号编码，或改用关键字写法。
+- `pgsql` / `postgresql` 等同 `postgres`，驱动留空按 `sqlite`。
+- compose 用 `--profile mysql` / `--profile postgres` 时，主机名要换成服务名：`mysql:3306` / `postgres:5432`。例如 `.env` 里写 `GOJOB_DB_DRIVER=mysql`、`GOJOB_DB_DSN=gojob:gojob123@tcp(mysql:3306)/gojob?charset=utf8mb4&parseTime=True&loc=Local`。
 
 Worker 侧示例进程读取：`GOJOB_WORKER_SERVER` / `GOJOB_WORKER_APP` / `GOJOB_WORKER_PASSWORD`，以及 `GOJOB_WORKER_AES_KEY`（与服务端某一把 key 一致即可，两侧只配 key、不配 kid）。零代码执行节点 `gojob-agent` 另有 `GOJOB_AGENT_*` 六个变量（脚本库、内联开关、并发、工作目录、超时），清单与安全含义见 `worker/README.md`「零代码执行节点」与 `.env.example`。
 

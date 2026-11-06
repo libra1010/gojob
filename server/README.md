@@ -28,7 +28,7 @@ go run ./cmd/gojob-server -addr :7800 -driver sqlite -dsn ./gojob.db
 | --- | --- | --- | --- |
 | `-addr` | `GOJOB_ADDR` | `:7800` | 监听地址 |
 | `-driver` | `GOJOB_DB_DRIVER` | `sqlite` | `sqlite` \| `mysql` \| `postgres` |
-| `-dsn` | `GOJOB_DB_DSN` | `gojob.db` | 对应驱动 DSN |
+| `-dsn` | `GOJOB_DB_DSN` | `gojob.db` | 对应驱动 DSN，格式见下「数据库 DSN」 |
 | `-admin-user` | `GOJOB_ADMIN_USER` | `admin` | 首启播种管理员（`user_infos` 为空时） |
 | `-admin-password` | `GOJOB_ADMIN_PASSWORD` | `admin123` | 播种密码（bcrypt 存储） |
 | `-public-url` | `GOJOB_PUBLIC_URL` | 自动推导 | 本副本的**对外可达地址**：随心跳下发给 worker 当长轮询目标（`cluster_hint`），并用于统计总览展示。多副本时各副本填自己那台"worker 打得通"的地址 |
@@ -41,6 +41,16 @@ go run ./cmd/gojob-server -addr :7800 -driver sqlite -dsn ./gojob.db
 | `-worker-aes-required` | `GOJOB_WORKER_AES_REQUIRED` | `false` | 要求所有注册都必须加密，明文回 `428 CodeChallengeRequired` + 一张现领的 challenge。**刻意不用 401**：SDK 把 401 当"票过期→重注册"，用 401 会形成死循环。只配 REQUIRED 不配 key 会启动失败（没有客户端能注册上来） |
 
 优先级：环境变量 > flag > 默认值。
+
+### 数据库 DSN
+
+| 驱动 | 示例 |
+| --- | --- |
+| `sqlite` | `./gojob.db`（文件路径；DSN 里没有 `_pragma` 时自动补 WAL + `busy_timeout(5000)` + `_txlock=immediate`） |
+| `mysql` | `gojob:gojob123@tcp(127.0.0.1:3306)/gojob?charset=utf8mb4&parseTime=True&loc=Local` |
+| `postgres` | `postgres://gojob:gojob123@127.0.0.1:5432/gojob?sslmode=disable`，或 `host=127.0.0.1 port=5432 user=gojob password=gojob123 dbname=gojob sslmode=disable` |
+
+MySQL 必须带 `parseTime=True`；`pgsql` / `postgresql` 与 `postgres` 等价；驱动留空按 sqlite。TLS 分别用 `tls=true|skip-verify` 与 `sslmode=require|verify-full`。完整说明见根目录 `README.md`「数据库 DSN 格式」。
 
 ## 数据库初始化
 
