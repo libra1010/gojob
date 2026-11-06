@@ -12,8 +12,8 @@ import java.util.List;
 public class OpenConfig {
 
     /**
-     * Server 数据面地址，如 {@code http://127.0.0.1:7700}。
-     * 多副本可以用逗号一次写全：{@code http://h1:7700,http://h2:7700}（与 {@link #serverAddresses} 合并去重）。
+     * Server 数据面地址，如 {@code http://127.0.0.1:7800}。
+     * 多副本可以用逗号一次写全：{@code http://h1:7800,http://h2:7800}（与 {@link #serverAddresses} 合并去重）。
      */
     private String serverAddress;
 

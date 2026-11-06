@@ -34,7 +34,7 @@ public class GoJobWorkerLifecycle {
 
     private static final Logger log = LoggerFactory.getLogger(GoJobWorkerLifecycle.class);
 
-    @ConfigProperty(name = "gojob.server-address", defaultValue = "http://127.0.0.1:7700")
+    @ConfigProperty(name = "gojob.server-address", defaultValue = "http://127.0.0.1:7800")
     String serverAddress;
 
     @ConfigProperty(name = "gojob.app-id", defaultValue = "demo")

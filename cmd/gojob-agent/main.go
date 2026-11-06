@@ -3,7 +3,7 @@
 // 这个进程不监听任何端口。要让它停止收单：Ctrl-C 走优雅下线（在跑的任务执行完并回报），
 // 或者在控制台「节点 → 停止接单」上改那一台节点的库字段（服务端不再把新任务派给它）。
 //
-//	GOJOB_WORKER_SERVER=http://127.0.0.1:7700 GOJOB_WORKER_APP=demo_app \
+//	GOJOB_WORKER_SERVER=http://127.0.0.1:7800 GOJOB_WORKER_APP=demo_app \
 //	GOJOB_WORKER_PASSWORD=demo123 GOJOB_AGENT_SCRIPT_DIR=/srv/gojob/scripts \
 //	gojob-agent
 //
@@ -79,7 +79,7 @@ func envDuration(key string, def time.Duration) time.Duration {
 
 func main() {
 	log.SetPrefix("[gojob-agent] ")
-	server := flag.String("server", envOr("GOJOB_WORKER_SERVER", "http://127.0.0.1:7700"),
+	server := flag.String("server", envOr("GOJOB_WORKER_SERVER", "http://127.0.0.1:7800"),
 		"gojob-server 地址；多副本用逗号分隔，worker 自带容错与 owner 跟随")
 	appId := flag.String("app", envOr("GOJOB_WORKER_APP", "demo_app"), "项目 ID")
 	password := flag.String("password", envOr("GOJOB_WORKER_PASSWORD", ""),

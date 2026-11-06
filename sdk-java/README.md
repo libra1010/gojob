@@ -31,7 +31,7 @@ gojob 的 Java Worker SDK（Maven 多模块工程，`groupId=com.gojob`，`versi
 
 ```java
 OpenConfig config = new OpenConfig()
-        .setServerAddress("http://127.0.0.1:7700") // gojob Server
+        .setServerAddress("http://127.0.0.1:7800") // gojob Server
         .setAppId("demo")                            // 需已在 Server 创建的应用
         .setPassword("demo123");
 
@@ -66,7 +66,7 @@ worker.awaitTermination(); // 阻塞，保持 main 存活
 gojob:
   worker:
     enable: true                 # 默认 true，置 false 整体关闭
-    server-address: http://127.0.0.1:7700
+    server-address: http://127.0.0.1:7800
     app-id: demo
     password: demo123
     worker-instance-id: ""       # 可选，本节点对外标识；默认 hostname-pid
@@ -122,7 +122,7 @@ public class GoJobWorkerLifecycle {
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
-| `serverAddress` / `server-address` | 必填 | Server 地址，如 `http://host:7700`；**多副本可逗号写全**：`http://h1:7700,http://h2:7700` |
+| `serverAddress` / `server-address` | 必填 | Server 地址，如 `http://host:7800`；**多副本可逗号写全**：`http://h1:7800,http://h2:7800` |
 | `serverAddresses` / `server-addresses` | 空 | 集群各副本地址（列表形式）。与 `serverAddress` 合并去重，首个即启动时的首选地址；填了就不需要给 worker 挂 LB/VIP |
 | `appId` / `app-id` | 必填 | 应用 ID |
 | `password` | `""` | 应用密码 |
@@ -136,7 +136,7 @@ public class GoJobWorkerLifecycle {
 
 ## 多副本：自寻址与 owner 跟随
 
-Server 是多副本时，把副本地址都配上（`server-address: http://h1:7700,http://h2:7700`），**不需要再为 worker 挂 LB/VIP**。SDK 侧规则与 Go SDK 逐条对齐（实现见 `GoJobWorker.applyHint` + `internal/HttpTransport`）：
+Server 是多副本时，把副本地址都配上（`server-address: http://h1:7800,http://h2:7800`），**不需要再为 worker 挂 LB/VIP**。SDK 侧规则与 Go SDK 逐条对齐（实现见 `GoJobWorker.applyHint` + `internal/HttpTransport`）：
 
 1. 启动时按列表顺序取第一个地址；任何一次"这台没答上话"（连不上、连接被 reset、5xx）就在其余已知地址上重放；业务错误（HTTP 200 且 `code!=0`，含 401 重注册）不换副本。
 2. 心跳响应带 `cluster_hint`：`servers` 并进已知集合（**后来新起的副本不需要重启 worker 就能被发现**），`owner` 是本 app 调度归属副本的可达地址。

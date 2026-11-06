@@ -42,7 +42,7 @@ func main() {
     worker.Register("hello", helloProcessor{})
 
     w := worker.New(worker.Config{
-        ServerAddress:  "http://127.0.0.1:7700",
+        ServerAddress:  "http://127.0.0.1:7800",
         AppId:          "demo_app",
         Password:       "demo123",
         MaxConcurrency: 8, // 默认 16
@@ -66,8 +66,8 @@ Server 端 Job 的 `processor` 字段填注册名（此处 `hello`）。也可�
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
-| `ServerAddress` | — | Server 基址，如 `http://host:7700`。单副本/前面已有 LB 时用 |
-| `ServerAddresses` | 空 | 多副本部署填**全部**副本地址（`["http://h1:7700","http://h2:7700"]`）。SDK 自己寻址与容错，不再必须挂 LB/VIP；与 `ServerAddress` 可同时给，会合并去重，列表首个即启动时的首选地址 |
+| `ServerAddress` | — | Server 基址，如 `http://host:7800`。单副本/前面已有 LB 时用 |
+| `ServerAddresses` | 空 | 多副本部署填**全部**副本地址（`["http://h1:7800","http://h2:7800"]`）。SDK 自己寻址与容错，不再必须挂 LB/VIP；与 `ServerAddress` 可同时给，会合并去重，列表首个即启动时的首选地址 |
 | `AppId` / `Password` | — | 所属项目与项目口令；口令只在注册（含 401 后重注册）时使用，配了 `AesKey` 时连注册都不再明文上线 |
 | `Address` | `hostname-pid` | 本节点对外标识 |
 | `MaxConcurrency` | 16 | 同时执行任务上限。**"一个 worker 能不能同时跑 200 个任务"就是这一项**：拉取时 SDK 把 `max_task_num` 报成当时剩余额度，服务端对该数不设上限，所以一次长轮询就能带回 200 条任务并当场起 200 条 goroutine。额度满时拉取循环等"有额度了"的信号（1s 只作兜底），不会白睡一秒。CPU 密集型任务把额度开到核数以上只是把排队挪进本进程 |
@@ -226,14 +226,14 @@ func (p *Processor) Process(ctx *worker.TaskContext) error {
 `cmd/gojob-agent` 是一个**不写一行代码**就能执行脚本任务的可执行程序：它内嵌本 SDK，把 `internal/agent` 里的官方脚本处理器注册好，参数全部从 `GOJOB_*` 环境变量读。业务方要的只是「在控制台建个任务，处理器信息填脚本名，脚本放在服务器上」，而不是每个脚本都编一个 Go 进程。
 
 ```bash
-GOJOB_WORKER_SERVER=http://127.0.0.1:7700 GOJOB_WORKER_APP=demo_app \
+GOJOB_WORKER_SERVER=http://127.0.0.1:7800 GOJOB_WORKER_APP=demo_app \
   GOJOB_WORKER_PASSWORD=demo123 GOJOB_AGENT_SCRIPT_DIR=/srv/gojob/scripts \
   ./gojob-agent
 ```
 
 | 环境变量 | flag | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `GOJOB_WORKER_SERVER` | `-server` | `http://127.0.0.1:7700` | Server 地址，填**任意一个副本**即可；其余副本由心跳响应里的 `cluster_hint` 自动学习，地址挂了 worker 侧自行容错 |
+| `GOJOB_WORKER_SERVER` | `-server` | `http://127.0.0.1:7800` | Server 地址，填**任意一个副本**即可；其余副本由心跳响应里的 `cluster_hint` 自动学习，地址挂了 worker 侧自行容错 |
 | `GOJOB_WORKER_APP` | `-app` | `demo_app` | 项目 ID |
 | `GOJOB_WORKER_PASSWORD` | `-password` | — | 项目口令，**只用环境变量传**，命令行参数会被同机用户看到 |
 | `GOJOB_WORKER_AES_KEY` | — | 空 | 注册口令加密的 key（64 位 hex）。配了它口令不再明文上线；agent 能跑命令，这一项比其他 worker 更值得配。故意**不提供 flag 形态**：key 与口令同为凭据，不该出现在 `ps` 里 |

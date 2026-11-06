@@ -52,7 +52,7 @@ import org.slf4j.LoggerFactory;
  *
  * <pre>{@code
  * OpenConfig cfg = new OpenConfig()
- *         .setServerAddress("http://127.0.0.1:7700")
+ *         .setServerAddress("http://127.0.0.1:7800")
  *         .setAppId("demo")
  *         .setPassword("demo123");
  * GoJobWorker worker = new GoJobWorker(cfg);

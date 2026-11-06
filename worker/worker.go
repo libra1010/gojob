@@ -92,7 +92,7 @@ func lookupProcessor(name string) (Processor, bool) {
 }
 
 type Config struct {
-	ServerAddress    string   // http://host:7700（单地址写法，等价于 ServerAddresses 只有一项）
+	ServerAddress    string   // http://host:7800（单地址写法，等价于 ServerAddresses 只有一项）
 	ServerAddresses  []string // 集群各副本地址；worker 自己容错，不再必须挂 LB/VIP
 	AppId            string
 	Password         string

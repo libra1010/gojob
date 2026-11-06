@@ -23,7 +23,7 @@ public final class QuickStart {
         // 与 Go demo 一致的覆盖方式：GOJOB_WORKER_SERVER / GOJOB_WORKER_APP / GOJOB_WORKER_PASSWORD
         // 以及 GOJOB_WORKER_AES_KEY（配了则项目口令不再明文上线，须与服务端 GOJOB_WORKER_AES_KEYS 之一一致）
         OpenConfig config = new OpenConfig()
-                .setServerAddress(env("GOJOB_WORKER_SERVER", "http://127.0.0.1:7700"))
+                .setServerAddress(env("GOJOB_WORKER_SERVER", "http://127.0.0.1:7800"))
                 .setAppId(env("GOJOB_WORKER_APP", "demo"))
                 .setPassword(env("GOJOB_WORKER_PASSWORD", "demo123"))
                 .setAesKey(env("GOJOB_WORKER_AES_KEY", ""))

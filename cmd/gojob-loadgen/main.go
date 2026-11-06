@@ -11,7 +11,7 @@
 // 典型用法（项目与任务由 scripts/verify-capacity.sh 准备好）：
 //
 //	GOJOB_SESSION_TOKEN=xxx go run ./cmd/gojob-loadgen \
-//	    -server http://127.0.0.1:7700 -app cap_app -pw cap123 \
+//	    -server http://127.0.0.1:7800 -app cap_app -pw cap123 \
 //	    -nodes 200 -job 1 -rounds 5 -hold 20s
 //
 // -job 指向一个 BROADCAST 任务时，"一轮"就是"每个在线节点一份"；
@@ -99,7 +99,7 @@ func die(format string, args ...any) {
 }
 
 func main() {
-	server := flag.String("server", "http://127.0.0.1:7700", "Server 地址，逗号分隔多副本")
+	server := flag.String("server", "http://127.0.0.1:7800", "Server 地址，逗号分隔多副本")
 	app := flag.String("app", "", "项目 ID")
 	pw := flag.String("pw", "", "项目口令")
 	job := flag.Uint64("job", 0, "要触发的任务 ID（BROADCAST 型：一份/节点）")

@@ -73,7 +73,7 @@ func envOverride(key string, target *string) {
 }
 
 func main() {
-	server := flag.String("server", "http://127.0.0.1:7700", "gojob-server 地址；多副本用逗号分隔，worker 自带容错与 owner 跟随")
+	server := flag.String("server", "http://127.0.0.1:7800", "gojob-server 地址；多副本用逗号分隔，worker 自带容错与 owner 跟随")
 	appId := flag.String("app", "demo_app", "app id")
 	password := flag.String("password", "demo123", "app password")
 	tag := flag.String("tag", "", "worker tag，供 SPECIFY 分发策略匹配（tagIn/tagEquals）")

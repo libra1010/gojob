@@ -2,7 +2,7 @@
 # 等待 gojob-server 就绪后，创建 demo worker 所需的 app（幂等：已存在则忽略）。
 set -eu
 
-BASE="${GOJOB_BASE:-http://gojob-server:7700}"
+BASE="${GOJOB_BASE:-http://gojob-server:7800}"
 USER_NAME="${GOJOB_ADMIN_USER:-admin}"
 PASS="${GOJOB_ADMIN_PASSWORD:-admin123}"
 APP_ID="${GOJOB_DEMO_APP_ID:-demo_app}"

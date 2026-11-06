@@ -29,7 +29,7 @@ import (
 )
 
 var (
-	base      = flag.String("base", "http://127.0.0.1:7700", "server 地址")
+	base      = flag.String("base", "http://127.0.0.1:7800", "server 地址")
 	app       = flag.String("app", "", "app_id / appName")
 	inst      = flag.String("inst", "", "worker instance_id")
 	pw        = flag.String("pw", "", "项目口令明文")

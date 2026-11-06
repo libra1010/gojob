@@ -34,14 +34,14 @@ services:
     image: gojob/gojob-server:latest
     command: ["/app/gojob-server"]
     ports:
-      - "7700:7700"
+      - "7800:7800"
     environment:
-      GOJOB_ADDR: ":7700"
+      GOJOB_ADDR: ":7800"
       GOJOB_DB_DRIVER: ${GOJOB_DB_DRIVER:-sqlite}
       GOJOB_DB_DSN: ${GOJOB_DB_DSN:-/app/data/gojob.db}
       GOJOB_ADMIN_USER: ${GOJOB_ADMIN_USER:-admin}
       GOJOB_ADMIN_PASSWORD: ${GOJOB_ADMIN_PASSWORD:-admin123}
-      GOJOB_PUBLIC_URL: ${GOJOB_PUBLIC_URL:-http://localhost:7700}
+      GOJOB_PUBLIC_URL: ${GOJOB_PUBLIC_URL:-http://localhost:7800}
       # 多副本部署时必须显式设为同一个值；compose 默认单副本，留空即可
       GOJOB_CLUSTER_SECRET: ${GOJOB_CLUSTER_SECRET:-}
       # 注册口令加密（口令不再明文上链路）。留空=不启用；多副本必须各节点配同一套。
@@ -57,7 +57,7 @@ services:
     volumes:
       - gojob-sqlite:/app/data
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7700/healthz"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7800/healthz"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -116,7 +116,7 @@ services:
     volumes:
       - ./deploy/init-demo-app.sh:/init.sh:ro
     environment:
-      GOJOB_BASE: http://gojob-server:7700
+      GOJOB_BASE: http://gojob-server:7800
       GOJOB_ADMIN_USER: ${GOJOB_ADMIN_USER:-admin}
       GOJOB_ADMIN_PASSWORD: ${GOJOB_ADMIN_PASSWORD:-admin123}
       GOJOB_DEMO_APP_ID: demo_app
@@ -135,7 +135,7 @@ services:
     image: gojob/gojob-demo:latest
     command: ["/app/gojob-demo"]
     environment:
-      GOJOB_WORKER_SERVER: http://gojob-server:7700
+      GOJOB_WORKER_SERVER: http://gojob-server:7800
       GOJOB_WORKER_APP: ${GOJOB_DEMO_APP_ID:-demo_app}
       GOJOB_WORKER_PASSWORD: ${GOJOB_DEMO_APP_PASSWORD:-demo123}
       # 与服务端 GOJOB_WORKER_AES_KEYS 之一一致；配了它口令不再明文上链路
@@ -163,7 +163,7 @@ services:
     image: gojob/gojob-agent:latest
     command: ["/app/gojob-agent"]
     environment:
-      GOJOB_WORKER_SERVER: http://gojob-server:7700
+      GOJOB_WORKER_SERVER: http://gojob-server:7800
       GOJOB_WORKER_APP: ${GOJOB_DEMO_APP_ID:-demo_app}
       GOJOB_WORKER_PASSWORD: ${GOJOB_DEMO_APP_PASSWORD:-demo123}
       # 与服务端 GOJOB_WORKER_AES_KEYS 之一一致；执行节点能跑命令，口令更不该上线
@@ -191,7 +191,7 @@ services:
     ports:
       - "8080:80"
     environment:
-      GOJOB_UPSTREAM: http://gojob-server:7700
+      GOJOB_UPSTREAM: http://gojob-server:7800
     restart: unless-stopped
     depends_on:
       gojob-server:

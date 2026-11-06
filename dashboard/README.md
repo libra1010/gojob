@@ -42,7 +42,7 @@ pnpm dev        # http://127.0.0.1:5173
 开发时 `/openapi/*` 经 Vite 代理转发到 Server，代理目标由环境变量 `VITE_API_TARGET` 指定，默认 `http://127.0.0.1:7789`：
 
 ```bash
-VITE_API_TARGET=http://127.0.0.1:7700 pnpm dev
+VITE_API_TARGET=http://127.0.0.1:7800 pnpm dev
 ```
 
 ## 构建
@@ -52,4 +52,4 @@ pnpm build      # vue-tsc 严格类型检查 + vite build，产物 dist/
 pnpm preview    # 预览构建产物
 ```
 
-生产部署见根目录 `docker-compose.yml` 的 `dashboard` 服务：Nginx 托管静态资源并反代 `/openapi` 到 `GOJOB_UPSTREAM`（默认 `http://gojob-server:7700`），模板见 `../deploy/nginx-dashboard.conf.template`。
+生产部署见根目录 `docker-compose.yml` 的 `dashboard` 服务：Nginx 托管静态资源并反代 `/openapi` 到 `GOJOB_UPSTREAM`（默认 `http://gojob-server:7800`），模板见 `../deploy/nginx-dashboard.conf.template`。

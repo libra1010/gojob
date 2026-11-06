@@ -79,7 +79,7 @@ func envBoolOverride(key string, target *bool) {
 }
 
 func main() {
-	addr := flag.String("addr", ":7700", "HTTP listen address")
+	addr := flag.String("addr", ":7800", "HTTP listen address")
 	driver := flag.String("driver", "sqlite", "db driver: sqlite | mysql | postgres")
 	dsn := flag.String("dsn", "gojob.db", "sqlite file, mysql DSN (user:pwd@tcp(host:port)/db?params) or postgres DSN (postgres://...)")
 	adminUser := flag.String("admin-user", "admin", "seeded admin username (first boot only)")

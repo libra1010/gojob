@@ -86,7 +86,7 @@ docker build -f Dockerfile.cn --build-arg BUILD_TARGET=gojob-server -t gojob/goj
 
 启动后：
 - 控制台 <http://localhost:8080>，默认账号 `admin / admin123`（**上线第一件事就是改密码**）
-- Server API <http://localhost:7700>，健康探针 `/healthz`
+- Server API <http://localhost:7800>，健康探针 `/healthz`
 - 数据落在 `gojob-sqlite` 卷里；compose 默认给 `GOJOB_RETENTION_DAYS=30`，历史实例会自动回收
 
 ### 方式二：二进制 / go run
@@ -96,7 +96,7 @@ docker build -f Dockerfile.cn --build-arg BUILD_TARGET=gojob-server -t gojob/goj
 ```bash
 cd /path/to/gojob
 # 1) 起 Server（默认 sqlite，自动建表）
-go run ./cmd/gojob-server -addr :7700 -driver sqlite -dsn ./gojob.db
+go run ./cmd/gojob-server -addr :7800 -driver sqlite -dsn ./gojob.db
 
 # 2) 起示例 Worker（另开终端）
 go run ./cmd/gojob-demo   # 读取 GOJOB_WORKER_* 环境变量或默认值
@@ -127,7 +127,7 @@ func (hello) Process(ctx *worker.TaskContext) error {
 func main() {
     worker.Register("hello", hello{})           // 名字对应任务配置里的"处理器类名"
     w := worker.New(worker.Config{
-        ServerAddress: "http://127.0.0.1:7700",  // 多副本用 ServerAddresses，worker 自己容错
+        ServerAddress: "http://127.0.0.1:7800",  // 多副本用 ServerAddresses，worker 自己容错
         AppId:         "demo_app", Password: "demo123",
     })
     ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -192,7 +192,7 @@ psql -U postgres < scripts/ddl/postgres.sql
 
 | 变量 | flag | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `GOJOB_ADDR` | `-addr` | `:7700` | HTTP 监听地址 |
+| `GOJOB_ADDR` | `-addr` | `:7800` | HTTP 监听地址 |
 | `GOJOB_DB_DRIVER` | `-driver` | `sqlite` | `sqlite` \| `mysql` \| `postgres` |
 | `GOJOB_DB_DSN` | `-dsn` | `./gojob.db` | 各驱动的 DSN |
 | `GOJOB_ADMIN_USER` | — | `admin` | 首次启动播种的管理员（仅 `user_infos` 为空时） |

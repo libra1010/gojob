@@ -10,4 +10,4 @@ FROM nginx:1.27-alpine
 COPY deploy/nginx-dashboard.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /src/dist /usr/share/nginx/html
 EXPOSE 80
-# 模板变量：GOJOB_UPSTREAM（默认 http://gojob-server:7700）
+# 模板变量：GOJOB_UPSTREAM（默认 http://gojob-server:7800）

@@ -21,12 +21,12 @@ gojob 调度中心服务端，单一二进制内含 HTTP API、调度器、注�
 ## 运行
 
 ```bash
-go run ./cmd/gojob-server -addr :7700 -driver sqlite -dsn ./gojob.db
+go run ./cmd/gojob-server -addr :7800 -driver sqlite -dsn ./gojob.db
 ```
 
 | flag | 环境变量 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `-addr` | `GOJOB_ADDR` | `:7700` | 监听地址 |
+| `-addr` | `GOJOB_ADDR` | `:7800` | 监听地址 |
 | `-driver` | `GOJOB_DB_DRIVER` | `sqlite` | `sqlite` \| `mysql` \| `postgres` |
 | `-dsn` | `GOJOB_DB_DSN` | `gojob.db` | 对应驱动 DSN |
 | `-admin-user` | `GOJOB_ADMIN_USER` | `admin` | 首启播种管理员（`user_infos` 为空时） |

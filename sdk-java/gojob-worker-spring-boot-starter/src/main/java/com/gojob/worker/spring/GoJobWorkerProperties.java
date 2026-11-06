@@ -17,8 +17,8 @@ public class GoJobWorkerProperties {
     private boolean enable = true;
 
     /**
-     * Server 数据面地址，如 {@code http://127.0.0.1:7700}；多副本可用逗号一次写全
-     * （{@code gojob.worker.server-address=http://h1:7700,http://h2:7700}）。enable=true 时必填。
+     * Server 数据面地址，如 {@code http://127.0.0.1:7800}；多副本可用逗号一次写全
+     * （{@code gojob.worker.server-address=http://h1:7800,http://h2:7800}）。enable=true 时必填。
      */
     private String serverAddress;
 

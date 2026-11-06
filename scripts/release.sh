@@ -171,7 +171,7 @@ awk -v ver="$VER" '
   printf 'gojob %s —— 每个附件是一个平台的完整包（内含 gojob-server / gojob-demo / gojob-agent 与 README、CHANGELOG）。\n\n' "$TAG"
   printf '```sh\n'
   printf 'tar xzf gojob-%s-linux-amd64.tar.gz && cd gojob-%s-linux-amd64\n' "$VER" "$VER"
-  printf './gojob-server            # sqlite 零依赖起服务，控制台 http://localhost:7700\n'
+  printf './gojob-server            # sqlite 零依赖起服务，控制台 http://localhost:7800\n'
   printf 'shasum -a 256 -c checksums.txt   # 校验和覆盖 5 个平台包\n'
   printf '```\n\n'
   cat "$NOTES.body"

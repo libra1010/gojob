@@ -23,8 +23,8 @@ COPY --from=build /out/app /app/${BUILD_TARGET}
 USER gojob
 # 只有服务端监听端口：demo worker 与 gojob-agent 都不开任何端口
 # （它们只出站访问 Server，优雅下线走 SDK 方法或控制台的「停止接单」开关）。
-EXPOSE 7700
+EXPOSE 7800
 # 刻意不在镜像里写 HEALTHCHECK：三个 target 监听不同端口，镜像级健康检查会让 demo/agent
-# 容器因为探不到 7700 而恒为 unhealthy。健康检查归编排层管——docker-compose.yml 里
+# 容器因为探不到 7800 而恒为 unhealthy。健康检查归编排层管——docker-compose.yml 里
 # gojob-server 那节有针对 /healthz 的定义。
 ENTRYPOINT ["/app/${BUILD_TARGET}"]

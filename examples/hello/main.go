@@ -34,7 +34,7 @@ func (hello) Process(ctx *worker.TaskContext) error {
 func main() {
 	worker.Register("hello", hello{}) // 名字对应任务配置里的"处理器类名"
 	w := worker.New(worker.Config{
-		ServerAddress: "http://127.0.0.1:7700", // 多副本用 ServerAddresses，worker 自己容错
+		ServerAddress: "http://127.0.0.1:7800", // 多副本用 ServerAddresses，worker 自己容错
 		AppId:         "demo_app",
 		Password:      "demo123",
 	})
