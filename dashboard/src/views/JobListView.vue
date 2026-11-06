@@ -282,140 +282,173 @@ const workersVisible = ref(false)
 </script>
 
 <template>
-  <el-card shadow="never">
-    <div class="toolbar">
-      <div class="left">
-        <el-button link @click="router.push('/apps')">‹ 返回项目</el-button>
-        <h3 class="page-title">任务列表 · {{ appId }}</h3>
+  <div class="jobs-page">
+    <div class="gj-page-head">
+      <div class="gj-page-head__main">
+        <button type="button" class="gj-back" @click="router.push('/apps')">‹ 返回项目</button>
+        <h3 class="gj-page-title">
+          任务列表
+          <span class="app-chip gj-mono">{{ appId }}</span>
+        </h3>
+        <div class="gj-page-sub">共 {{ total }} 个任务 · 定时表达式与下次触发时间以服务器时区为准</div>
       </div>
-      <div>
-        <el-button @click="reload" :loading="loading">刷 新</el-button>
-        <el-button @click="workersVisible = true">在线机器</el-button>
-        <el-button v-if="canImport" @click="importVisible = true">导 入</el-button>
-        <el-button v-if="canManage" @click="openBatchExport">
+      <div class="gj-page-actions">
+        <el-button size="small" :loading="loading" @click="reload">刷 新</el-button>
+        <el-button size="small" @click="workersVisible = true">在线机器</el-button>
+        <el-button v-if="canImport" size="small" @click="importVisible = true">导 入</el-button>
+        <el-button v-if="canManage" size="small" @click="openBatchExport">
           批量导出{{ selection.length ? `（已选 ${selection.length}）` : '' }}
         </el-button>
-        <el-button v-if="canManage" type="primary" @click="openCreate">新建任务</el-button>
+        <el-button v-if="canManage" size="small" type="primary" @click="openCreate">
+          新建任务
+        </el-button>
       </div>
     </div>
 
-    <div class="filters">
-      <el-input v-model="filterJobId" placeholder="任务 ID" class="f-id" clearable @keyup.enter="onSearch" />
-      <el-input
-        v-model="filterKeyword"
-        placeholder="关键字（任务名 / 描述）"
-        class="f-kw"
-        clearable
-        @keyup.enter="onSearch"
-      />
-      <el-button type="primary" plain @click="onSearch">查 询</el-button>
-      <el-button @click="onReset">重 置</el-button>
-    </div>
-
-    <el-table :data="jobs" v-loading="loading" stripe @selection-change="(rows: JobInfo[]) => (selection = rows)">
-      <el-table-column type="selection" width="46" />
-      <el-table-column prop="id" label="任务 ID" width="80" />
-      <el-table-column prop="job_name" label="任务名称" min-width="140" show-overflow-tooltip />
-      <el-table-column label="描述" min-width="140" show-overflow-tooltip>
-        <template #default="{ row }">
-          <span v-if="row.job_description">{{ row.job_description }}</span>
-          <span v-else class="muted">-</span>
-        </template>
-      </el-table-column>
-      <el-table-column prop="processor" label="处理器" min-width="180" show-overflow-tooltip />
-      <el-table-column label="定时信息" min-width="150">
-        <template #default="{ row }">
-          <el-tag size="small" effect="plain" class="te-tag">
-            {{ row.time_expression_type || 'CRON' }}
-          </el-tag>
-          <code class="cron">{{ exprCell(row) }}</code>
-        </template>
-      </el-table-column>
-      <!-- 列与翻译函数都按兼容协议的任务列表那一版：定时信息 → 执行类型 → 处理器类型 -->
-      <el-table-column label="执行类型" width="100">
-        <template #default="{ row }">{{ translateExecuteType(row.execute_type) }}</template>
-      </el-table-column>
-      <el-table-column label="处理器类型" width="120">
-        <template #default="{ row }">{{ translateProcessorType(row.processor_type) }}</template>
-      </el-table-column>
-      <el-table-column label="状态" width="80">
-        <template #default="{ row }">
-          <!-- 启用/暂停就是一个开关，不另设按钮（同兼容协议） -->
-          <el-switch
-            :model-value="row.enable"
-            :disabled="!canManage"
-            size="small"
-            style="--el-switch-on-color: #13ce66; --el-switch-off-color: #ff4949"
-            @update:model-value="(v: any) => onToggle(row, !!v)"
+    <el-card shadow="never" class="table-card">
+      <div class="filter-bar">
+        <div class="filter-inputs">
+          <el-input
+            v-model="filterJobId"
+            placeholder="任务 ID"
+            class="f-id"
+            clearable
+            @keyup.enter="onSearch"
           />
-        </template>
-      </el-table-column>
-      <el-table-column label="日志级别" width="100">
-        <template #default="{ row }">
-          <el-tag size="small" effect="plain" type="info">{{ row.log_level || 'INFO' }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="跳过策略" width="90">
-        <template #default="{ row }">
-          <el-tooltip v-if="row.skip_when_running" content="任务执行中则不发起新任务" placement="top">
-            <el-tag type="warning" size="small">开启</el-tag>
-          </el-tooltip>
-          <span v-else class="muted">-</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="下次触发时间" min-width="160">
-        <template #default="{ row }">
-          <span v-if="row.time_expression_type === 'API'" class="muted">手动触发</span>
-          <span v-else-if="row.time_expression_type === 'DEPENDENCY'" class="muted">
-            等待上游触发
-          </span>
-          <span v-else>{{ formatTime(row.next_trigger_time) }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="252" fixed="right">
-        <template #default="{ row }">
-          <el-button v-if="canManage" size="small" @click="openEdit(row)">编 辑</el-button>
-          <el-button
-            v-if="canManage"
-            size="small"
-            type="primary"
-            plain
-            @click="onOperate(row, 'trigger')"
-          >
-            运 行
-          </el-button>
-          <el-button size="small" @click="router.push(`/jobs/${row.id}/instances`)">运行记录</el-button>
-          <el-dropdown v-if="canManage" trigger="click" class="more">
-            <el-button size="small" text type="primary">更多 ▾</el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item @click="onRunByParams(row)">参数运行</el-dropdown-item>
-                <el-dropdown-item @click="openCopy(row)">复 制</el-dropdown-item>
-                <el-dropdown-item @click="openExport(row)">导 出</el-dropdown-item>
-                <el-dropdown-item divided @click="onDelete(row)">
-                  <span class="danger">删 除</span>
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </template>
-      </el-table-column>
-      <template #empty>
-        <el-empty description="该项目暂无任务" />
-      </template>
-    </el-table>
+          <el-input
+            v-model="filterKeyword"
+            placeholder="关键字（任务名 / 描述）"
+            class="f-kw"
+            clearable
+            @keyup.enter="onSearch"
+          />
+        </div>
+        <div class="filter-actions">
+          <span class="count-hint">共 {{ total }} 个任务</span>
+          <el-button type="primary" plain size="small" @click="onSearch">查 询</el-button>
+          <el-button size="small" @click="onReset">重 置</el-button>
+        </div>
+      </div>
 
-    <!-- 后端 index 是 0 基，这里转成 1 基；只有一页时不占地方 -->
-    <el-pagination
-      class="pager"
-      layout="prev, pager, next, total"
-      :total="total"
-      :page-size="pageSize"
-      :current-page="index + 1"
-      :hide-on-single-page="true"
-      @current-change="onPage"
-    />
-  </el-card>
+      <el-table :data="jobs" v-loading="loading" size="small" @selection-change="(rows: JobInfo[]) => (selection = rows)">
+        <el-table-column type="selection" width="46" />
+        <el-table-column label="ID" width="72">
+          <template #default="{ row }"><span class="gj-mono">#{{ row.id }}</span></template>
+        </el-table-column>
+        <el-table-column prop="job_name" label="任务名称" min-width="136" show-overflow-tooltip />
+        <el-table-column label="描述" min-width="110" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.job_description">{{ row.job_description }}</span>
+            <span v-else class="muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="处理器" min-width="158" show-overflow-tooltip>
+          <template #default="{ row }">
+            <div class="proc-name">{{ row.processor }}</div>
+            <div class="proc-type">{{ translateProcessorType(row.processor_type) }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="定时信息" min-width="176">
+          <template #default="{ row }">
+            <div class="time-cell">
+              <el-tag size="small" effect="plain" class="type-tag">
+                {{ row.time_expression_type || 'CRON' }}
+              </el-tag>
+              <code class="cron" :title="exprCell(row)">{{ exprCell(row) }}</code>
+            </div>
+          </template>
+        </el-table-column>
+        <!-- 列与翻译函数都按兼容协议的任务列表那一版：定时信息 → 执行类型 → 处理器 -->
+        <el-table-column label="执行类型" width="92">
+          <template #default="{ row }">{{ translateExecuteType(row.execute_type) }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="104">
+          <template #default="{ row }">
+            <div class="status-cell">
+              <!-- 启用/暂停就是一个开关，不另设按钮（同兼容协议） -->
+              <el-switch
+                :model-value="row.enable"
+                :disabled="!canManage"
+                size="small"
+                :aria-label="`任务「${row.job_name}」启用状态`"
+                style="--el-switch-on-color: var(--gj-success); --el-switch-off-color: var(--gj-warning)"
+                @update:model-value="(v: any) => onToggle(row, !!v)"
+              />
+              <el-tooltip
+                v-if="row.skip_when_running"
+                content="任务执行中则不发起新任务"
+                placement="top"
+              >
+                <span class="skip-mark">跳过</span>
+              </el-tooltip>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="日志级别" width="84">
+          <template #default="{ row }">
+            <el-tag size="small" effect="plain" type="info">{{ row.log_level || 'INFO' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="下次触发时间" min-width="160">
+          <template #default="{ row }">
+            <span v-if="row.time_expression_type === 'API'" class="muted">手动触发</span>
+            <span v-else-if="row.time_expression_type === 'DEPENDENCY'" class="muted">
+              等待上游触发
+            </span>
+            <span v-else class="time">{{ formatTime(row.next_trigger_time) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="204" fixed="right">
+          <template #default="{ row }">
+            <div class="row-actions">
+              <el-button
+                v-if="canManage"
+                link
+                type="primary"
+                size="small"
+                @click="onOperate(row, 'trigger')"
+              >
+                运行
+              </el-button>
+              <el-button v-if="canManage" link type="primary" size="small" @click="openEdit(row)">
+                编辑
+              </el-button>
+              <el-button link size="small" @click="router.push(`/jobs/${row.id}/instances`)">
+                记录
+              </el-button>
+              <el-dropdown v-if="canManage" trigger="click" class="more">
+                <el-button link type="primary" size="small">更多 ▾</el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item @click="onRunByParams(row)">参数运行</el-dropdown-item>
+                    <el-dropdown-item @click="openCopy(row)">复 制</el-dropdown-item>
+                    <el-dropdown-item @click="openExport(row)">导 出</el-dropdown-item>
+                    <el-dropdown-item divided @click="onDelete(row)">
+                      <span class="danger">删 除</span>
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <el-empty description="该项目暂无任务" :image-size="72" />
+        </template>
+      </el-table>
+
+      <!-- 后端 index 是 0 基，这里转成 1 基；只有一页时不占地方 -->
+      <el-pagination
+        class="pager"
+        layout="prev, pager, next, total"
+        :total="total"
+        :page-size="pageSize"
+        :current-page="index + 1"
+        :hide-on-single-page="true"
+        @current-change="onPage"
+      />
+    </el-card>
+  </div>
 
   <JobFormDrawer
     v-model="formVisible"
@@ -454,42 +487,128 @@ const workersVisible = ref(false)
 </template>
 
 <style scoped>
-.toolbar {
+.app-chip {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: var(--gj-primary-soft);
+  color: var(--gj-primary);
+  font-size: 11px;
+  font-weight: 500;
+  vertical-align: 2px;
+}
+.table-card :deep(.el-card__body) {
+  padding: 14px 16px 12px;
+}
+.filter-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 4px;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--gj-border-soft);
 }
-.left {
+.filter-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.filter-actions {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.page-title {
-  margin: 0;
-}
-.filters {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 10px 0 12px;
+.count-hint {
+  margin-right: 4px;
+  font-size: 12px;
+  color: var(--gj-text-muted);
 }
 .f-id {
-  width: 140px;
+  width: 130px;
 }
 .f-kw {
-  width: 260px;
+  width: 250px;
+}
+.time-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.type-tag {
+  flex-shrink: 0;
+}
+.cron {
+  max-width: 150px;
+  padding: 1px 6px;
+  border: 1px solid var(--gj-border-soft);
+  border-radius: 4px;
+  background: var(--gj-surface-subtle);
+  color: var(--gj-text-regular);
+  font-family: var(--gj-mono);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.time {
+  font-size: 12px;
+  color: var(--gj-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.proc-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.proc-type {
+  margin-top: 1px;
+  font-size: 11px;
+  color: var(--gj-text-faint);
+}
+.status-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.skip-mark {
+  padding: 0 5px;
+  border-radius: 3px;
+  background: var(--gj-warning-soft);
+  color: var(--gj-warning);
+  font-size: 11px;
+  line-height: 17px;
+  cursor: help;
+}
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.row-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+.row-actions :deep(.el-button) {
+  padding: 0;
+  height: auto;
+}
+.row-actions :deep(.el-button.is-link) {
+  font-size: 12px;
+}
+.more {
+  vertical-align: middle;
 }
 .pager {
   margin-top: 12px;
   justify-content: flex-end;
 }
-.more {
-  margin-left: 8px;
-  vertical-align: middle;
-}
 .danger {
-  color: #f56c6c;
+  color: var(--gj-danger);
 }
 .tip {
   margin-bottom: 10px;
@@ -505,23 +624,19 @@ const workersVisible = ref(false)
 }
 .hint {
   font-size: 12px;
-  color: #909399;
+  color: var(--gj-text-muted);
 }
 .mono :deep(textarea) {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--gj-mono);
   font-size: 12px;
   line-height: 1.55;
 }
-.cron {
-  background: #f5f7fa;
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: 12px;
-}
-.te-tag {
-  margin-right: 6px;
-}
 .muted {
-  color: #c0c4cc;
+  color: var(--gj-text-faint);
+}
+@media (max-width: 900px) {
+  .f-kw {
+    width: 200px;
+  }
 }
 </style>

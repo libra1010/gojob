@@ -9,7 +9,7 @@ const props = withDefaults(
     height?: number
     color?: string
   }>(),
-  { values: () => [], width: 130, height: 30, color: '#409eff' },
+  { values: () => [], width: 130, height: 30, color: '#175CD3' },
 )
 
 const points = computed(() => {
@@ -25,7 +25,7 @@ const points = computed(() => {
 </script>
 
 <template>
-  <svg v-if="points" :width="width" :height="height" class="spark" role="img">
+  <svg v-if="points" :width="width" :height="height" class="spark" aria-hidden="true">
     <polyline :points="points" fill="none" :stroke="color" stroke-width="1.5" />
   </svg>
   <span v-else class="spark-empty">—</span>

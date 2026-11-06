@@ -153,6 +153,7 @@ async function onSubmit() {
     </div>
     <el-input
       v-model="raw"
+      class="raw"
       type="textarea"
       :rows="10"
       placeholder='[
@@ -222,23 +223,28 @@ async function onSubmit() {
 }
 .files {
   font-size: 12px;
-  color: #909399;
+  color: var(--gj-text-muted);
   margin-bottom: 8px;
   line-height: 1.8;
 }
 .file {
-  background: #f5f7fa;
+  background: var(--gj-surface-subtle);
   border-radius: 3px;
   padding: 1px 6px;
   margin-right: 6px;
+}
+.raw :deep(textarea) {
+  font-family: var(--gj-mono);
+  font-size: 12px;
+  line-height: 1.6;
 }
 .summary {
   margin: 14px 0 10px;
 }
 .ok {
-  color: #67c23a;
+  color: var(--gj-success);
 }
 .bad {
-  color: #f56c6c;
+  color: var(--gj-danger);
 }
 </style>

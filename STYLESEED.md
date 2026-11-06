@@ -1,0 +1,27 @@
+# StyleSeed — Design Lock
+<!-- Selections persist here. This file cannot waive StyleSeed core invariants. -->
+- App domain: developer-tools
+- Surface: desktop-web
+- Surface adapter: product-ui
+- Page type: dashboard
+- Output grammar: operations-console
+- Grammar path: built-in:engine/RULESETS.md
+- Grammar fallback: operations-console
+- Reference confidence: n/a
+- Brand recipe: auto
+- Palette recipe: cobalt-instrument
+- Key color: #175CD3
+- Palette character: balanced
+- Palette mode: light
+- Palette harmony: auto
+- Surface temperature: cool
+- Aesthetic profile: none
+- Skin: custom
+- Font: system-ui
+- Radius: restrained
+- Elevation: tonal
+- Density: compact
+- Motion: snap restrained
+- Imagery/data role: data-first; status, tables and trends carry the evidence
+- Signature move: a compact live posture strip puts success rate, running instances, exceptions and online workers in one line above the evidence tables
+- Locked: 2026-11-06

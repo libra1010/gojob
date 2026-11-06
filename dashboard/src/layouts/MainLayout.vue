@@ -98,12 +98,12 @@ async function onLogout() {
 
 <template>
   <el-container class="layout">
-    <el-header class="header">
+    <el-header class="header" height="60px">
       <div class="brand" @click="router.push('/')">
         <span class="logo">G</span>
         <span class="brand-text">
           <span class="title">gojob</span>
-          <span class="subtitle">轻量级分布式任务调度平台</span>
+          <span class="subtitle">任务调度控制台</span>
         </span>
       </div>
       <el-menu
@@ -124,7 +124,14 @@ async function onLogout() {
         </el-sub-menu>
       </el-menu>
       <el-dropdown trigger="click">
-        <span class="user">{{ displayName }}<span class="role-tag">{{ roleLabel }}</span></span>
+        <button class="user" type="button" title="账号菜单">
+          <span class="avatar">{{ (displayName || '?').slice(0, 1).toUpperCase() }}</span>
+          <span class="user-meta">
+            <span class="user-name">{{ displayName }}</span>
+            <span class="role-tag">{{ roleLabel }}</span>
+          </span>
+          <span class="caret">▾</span>
+        </button>
         <template #dropdown>
           <el-dropdown-menu>
             <el-dropdown-item @click="openPwdDialog">修改密码</el-dropdown-item>
@@ -133,12 +140,14 @@ async function onLogout() {
         </template>
       </el-dropdown>
     </el-header>
-    <el-main>
-      <el-breadcrumb v-if="showCrumb" separator="/" class="crumb">
-        <el-breadcrumb-item :to="{ path: crumbRoot }">{{ crumbParent }}</el-breadcrumb-item>
-        <el-breadcrumb-item>{{ route.meta.title }}</el-breadcrumb-item>
-      </el-breadcrumb>
-      <router-view />
+    <el-main class="main">
+      <div class="main-inner">
+        <el-breadcrumb v-if="showCrumb" separator="/" class="crumb">
+          <el-breadcrumb-item :to="{ path: crumbRoot }">{{ crumbParent }}</el-breadcrumb-item>
+          <el-breadcrumb-item>{{ route.meta.title }}</el-breadcrumb-item>
+        </el-breadcrumb>
+        <router-view />
+      </div>
     </el-main>
 
     <el-dialog v-model="pwdVisible" title="修改密码" width="420px" append-to-body>
@@ -164,13 +173,19 @@ async function onLogout() {
 <style scoped>
 .layout {
   min-height: 100vh;
+  background: var(--gj-canvas);
 }
 .header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
   display: flex;
   align-items: center;
   gap: 28px;
-  background: #fff;
-  border-bottom: 1px solid #e4e7ed;
+  padding: 0 24px;
+  background: var(--gj-nav);
+  border-bottom: 1px solid var(--gj-nav-border);
+  box-shadow: 0 1px 0 rgba(8, 16, 28, 0.35);
 }
 .brand {
   display: flex;
@@ -183,17 +198,20 @@ async function onLogout() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 6px;
-  background: #409eff;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--gj-primary);
   color: #fff;
-  font-weight: 700;
+  font-size: 16px;
+  font-weight: 750;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
 }
 .title {
   font-size: 17px;
-  font-weight: 600;
-  color: #303133;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: #fff;
   white-space: nowrap;
 }
 /* 主标题只写产品名，定位放副标题：一屏之内先认出"这是 gojob"，再看它是干什么的 */
@@ -204,26 +222,116 @@ async function onLogout() {
 }
 .subtitle {
   font-size: 11px;
-  color: #909399;
+  letter-spacing: 0.04em;
+  color: #8fa6c2;
   white-space: nowrap;
 }
 .nav {
   flex: 1;
+  min-width: 0;
   border-bottom: none;
   background: transparent;
-  --el-menu-item-height: 58px;
+  --el-menu-item-height: 60px;
+  --el-menu-bg-color: transparent;
+  --el-menu-text-color: var(--gj-nav-text);
+  --el-menu-hover-text-color: #fff;
+  --el-menu-hover-bg-color: rgba(255, 255, 255, 0.06);
+  --el-menu-active-color: #fff;
+  --el-menu-base-level-padding: 16px;
+}
+.nav :deep(.el-menu-item),
+.nav :deep(.el-sub-menu__title) {
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+  font-weight: 500;
+}
+.nav :deep(.el-menu-item.is-active) {
+  color: #fff;
+  border-bottom-color: #60a5fa;
+  background: rgba(96, 165, 250, 0.1);
+}
+.nav :deep(.el-sub-menu.is-active .el-sub-menu__title) {
+  color: #fff;
+  border-bottom-color: #60a5fa;
 }
 .user {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 8px 4px 4px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--gj-nav-text);
+  font: inherit;
   cursor: pointer;
-  color: #606266;
-  white-space: nowrap;
+}
+.user:hover,
+.user:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--gj-nav-border);
+  outline: none;
+}
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #1d3554;
+  border: 1px solid rgba(148, 176, 214, 0.28);
+  color: #dbeafe;
+  font-size: 12px;
+  font-weight: 600;
+}
+.user-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.25;
+}
+.user-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #fff;
 }
 .role-tag {
-  margin-left: 6px;
-  font-size: 12px;
-  color: #909399;
+  font-size: 11px;
+  color: #8fa6c2;
+}
+.caret {
+  margin-left: 2px;
+  font-size: 10px;
+  color: #8fa6c2;
+}
+.main {
+  padding: 20px 24px 32px;
+}
+.main-inner {
+  width: 100%;
+  max-width: 1560px;
+  margin: 0 auto;
 }
 .crumb {
-  margin-bottom: 14px;
+  margin-bottom: 12px;
+}
+@media (max-width: 900px) {
+  .header {
+    gap: 12px;
+    padding: 0 16px;
+  }
+  .subtitle,
+  .user-meta {
+    display: none;
+  }
+  .main {
+    padding: 16px;
+  }
+}
+@media (max-width: 640px) {
+  .brand-text {
+    display: none;
+  }
 }
 </style>

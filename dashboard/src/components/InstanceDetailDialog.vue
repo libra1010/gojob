@@ -9,7 +9,7 @@
 import { ref, watch } from 'vue'
 import { instanceDetail } from '@/api/instance'
 import type { InstanceDetail } from '@/api/types'
-import { formatTime, statusTagType } from '@/utils/format'
+import { formatTime, sourceLabel, statusLabel, statusPillClass } from '@/utils/format'
 
 const props = defineProps<{ modelValue: boolean; instanceId: number }>()
 const emit = defineEmits<{ 'update:modelValue': [boolean] }>()
@@ -55,6 +55,19 @@ const isInstanceFinal = () => {
   const st = detail.value?.instance.status || ''
   return ['SUCCEED', 'FAILED', 'STOPPED'].includes(st)
 }
+
+function executeLabel(type?: string) {
+  switch (type) {
+    case 'BROADCAST':
+      return '广播执行'
+    case 'MAP':
+      return 'Map'
+    case 'MAP_REDUCE':
+      return 'MapReduce'
+    default:
+      return '单机执行'
+  }
+}
 </script>
 
 <template>
@@ -69,15 +82,15 @@ const isInstanceFinal = () => {
       <el-descriptions v-if="detail" :column="3" border size="small">
         <el-descriptions-item label="任务名称">{{ detail.instance.job_name }}</el-descriptions-item>
         <el-descriptions-item label="状态">
-          <el-tag :type="statusTagType(detail.instance.status)" size="small">
-            {{ detail.instance.status }}
-          </el-tag>
+          <span class="gj-pill" :class="statusPillClass(detail.instance.status)">
+            {{ statusLabel(detail.instance.status) }}
+          </span>
         </el-descriptions-item>
         <el-descriptions-item label="执行类型">
-          {{ detail.instance.execute_type || 'STANDALONE' }}
+          {{ executeLabel(detail.instance.execute_type) }}
         </el-descriptions-item>
         <el-descriptions-item label="处理器">{{ detail.instance.processor }}</el-descriptions-item>
-        <el-descriptions-item label="触发来源">{{ detail.instance.source }}</el-descriptions-item>
+        <el-descriptions-item label="触发来源">{{ sourceLabel(detail.instance.source) }}</el-descriptions-item>
         <el-descriptions-item label="重试次数">{{ detail.instance.try_times }}</el-descriptions-item>
         <el-descriptions-item label="创建时间">{{ formatTime(detail.instance.create_time) }}</el-descriptions-item>
         <el-descriptions-item label="最后上报">{{ formatTime(detail.instance.modify_time) }}</el-descriptions-item>
@@ -85,7 +98,7 @@ const isInstanceFinal = () => {
       </el-descriptions>
 
       <div class="stats">
-        <span class="label">Task 统计:</span>
+        <span class="label">子任务统计</span>
         <code>{{ statsText() }}</code>
         <el-button size="small" :loading="loading" @click="load">重 查</el-button>
       </div>
@@ -117,7 +130,9 @@ const isInstanceFinal = () => {
         <el-table-column prop="failed_cnt" label="失败数" width="70" />
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
-            <el-tag :type="statusTagType(row.status)" size="small">{{ row.status_str || row.status }}</el-tag>
+            <span class="gj-pill" :class="statusPillClass(row.status)">
+              {{ statusLabel(row.status_str || row.status) }}
+            </span>
           </template>
         </el-table-column>
         <el-table-column label="创建时间" width="160">
@@ -153,14 +168,16 @@ const isInstanceFinal = () => {
   margin: 12px 0;
 }
 .stats code {
-  background: #f5f7fa;
+  background: var(--gj-surface-subtle);
   padding: 2px 6px;
   border-radius: 3px;
+  font-family: var(--gj-mono);
   font-size: 12px;
 }
 .query {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 6px;
 }
@@ -169,9 +186,9 @@ const isInstanceFinal = () => {
 }
 .prefix,
 .suffix {
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: var(--gj-mono);
   font-size: 12px;
-  color: #606266;
+  color: var(--gj-text-muted);
   white-space: nowrap;
 }
 .query-error {
@@ -179,7 +196,7 @@ const isInstanceFinal = () => {
 }
 .hint {
   font-size: 12px;
-  color: #909399;
+  color: var(--gj-text-muted);
   margin-bottom: 8px;
 }
 .tasks {
@@ -187,8 +204,11 @@ const isInstanceFinal = () => {
 }
 .total {
   font-size: 12px;
-  color: #909399;
+  color: var(--gj-text-muted);
   margin-bottom: 10px;
+}
+.result {
+  margin-top: 10px;
 }
 .result .label {
   font-weight: 600;
@@ -197,15 +217,16 @@ const isInstanceFinal = () => {
   margin: 4px 0 0;
   white-space: pre-wrap;
   word-break: break-all;
-  background: #f5f7fa;
+  background: var(--gj-surface-subtle);
   padding: 8px;
   border-radius: 4px;
   max-height: 120px;
   overflow: auto;
+  font-family: var(--gj-mono);
   font-size: 12px;
 }
 .error {
-  color: #f56c6c;
+  color: var(--gj-danger);
   margin-top: 8px;
 }
 </style>

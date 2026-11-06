@@ -832,12 +832,16 @@ async function onSubmit() {
           <el-form-item label="指定机器" prop="designated_workers">
             <el-input
               v-model="form.designated_workers"
-              placeholder="逗号分隔的 worker 地址，如 127.0.0.1:7700,127.0.0.1:7701"
+              placeholder="逗号分隔的 worker 地址，如 127.0.0.1:7801,127.0.0.1:7802"
             />
             <div class="hint">留空表示由调度器在在线机器中自动选择</div>
           </el-form-item>
           <el-form-item label="调度策略" prop="skip_when_running">
-            <el-switch v-model="form.skip_when_running" active-text="任务执行中则不发起新任务" />
+            <el-switch
+              v-model="form.skip_when_running"
+              aria-label="任务执行中则不发起新任务"
+              active-text="任务执行中则不发起新任务"
+            />
           </el-form-item>
         </el-collapse-item>
       </el-collapse>
@@ -870,18 +874,24 @@ async function onSubmit() {
 .group-title {
   font-size: 13px;
   font-weight: 600;
-  color: #303133;
+  color: var(--gj-text);
   margin: 4px 0 12px;
   padding-left: 8px;
-  border-left: 3px solid #409eff;
+  border-left: 3px solid var(--gj-primary);
 }
 .hint {
   font-size: 12px;
-  color: #909399;
+  color: var(--gj-text-muted);
+  line-height: 1.6;
+}
+.form-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--gj-text-muted);
   line-height: 1.6;
 }
 .hint code {
-  background: #f5f7fa;
+  background: var(--gj-surface-subtle);
   padding: 0 4px;
   border-radius: 3px;
 }

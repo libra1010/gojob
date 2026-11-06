@@ -5,7 +5,7 @@ import { ElMessage } from 'element-plus'
 import { getInstance, listInstanceTasks, listTaskLogs } from '@/api/instance'
 import type { InstanceTask, JobInstance, TaskLog } from '@/api/types'
 import { isFinalStatus } from '@/api/types'
-import { formatMillis, formatTime, statusTagType } from '@/utils/format'
+import { formatMillis, formatTime, sourceLabel, statusLabel, statusPillClass } from '@/utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -158,21 +158,33 @@ function taskLabel(t: InstanceTask) {
 </script>
 
 <template>
-  <el-card shadow="never" class="page">
-    <div class="toolbar">
-      <div class="left">
-        <el-button link @click="router.back()">‹ 返回实例</el-button>
-        <h3 class="page-title">实例任务日志 · #{{ instanceId }}</h3>
-        <el-tag v-if="instance" :type="statusTagType(instance.status)" size="small">
-          {{ instance.status }}
-        </el-tag>
-        <span v-if="instance" class="meta">
-          {{ instance.job_name }}（{{ instance.app_id }}） · 来源
-          {{ instance.source || 'CRON' }} · {{ formatTime(instance.create_time) }}
-        </span>
+  <div class="log-page">
+    <div class="gj-page-head">
+      <div class="gj-page-head__main">
+        <button type="button" class="gj-back" @click="router.back()">‹ 返回实例</button>
+        <h3 class="gj-page-title">
+          实例日志
+          <span class="id-chip gj-mono">#{{ instanceId }}</span>
+        </h3>
+        <div class="gj-page-sub">
+          <span v-if="instance" class="gj-pill" :class="statusPillClass(instance.status)">
+            {{ statusLabel(instance.status) }}
+          </span>
+          <template v-if="instance">
+            <span class="head-job">{{ instance.job_name }}</span>
+            <span class="meta-sep" />
+            <span class="gj-mono">{{ instance.app_id }}</span>
+            <span class="meta-sep" />
+            <span>来源 {{ sourceLabel(instance.source) }}</span>
+            <span class="meta-sep" />
+            <span>{{ formatTime(instance.create_time) }}</span>
+            <span class="meta-sep" />
+          </template>
+          <span>{{ pollState }}</span>
+        </div>
       </div>
-      <div class="right">
-        <span class="updated">{{ pollState }} · 上次 {{ lastUpdated || '-' }}</span>
+      <div class="gj-page-actions">
+        <span class="updated">上次 {{ lastUpdated || '-' }}</span>
         <el-button size="small" :loading="loadingLogs" @click="tick(true)">手动刷新</el-button>
       </div>
     </div>
@@ -180,46 +192,45 @@ function taskLabel(t: InstanceTask) {
     <el-empty v-if="!tasks.length && !instance" description="未查询到该实例的任务" />
     <div v-else class="body">
       <!-- 左侧：任务列表（单选） -->
-      <div class="side">
-        <div class="side-head">任务列表（{{ tasks.length }}）</div>
+      <aside class="side">
+        <div class="side-head">
+          <span>任务列表</span>
+          <span class="side-count gj-num">{{ tasks.length }}</span>
+        </div>
         <div class="side-scroll">
-          <el-menu
-            :default-active="String(activeTaskId ?? '')"
-            class="task-menu"
-            @select="(index: string) => selectTask(Number(index))"
+          <button
+            v-for="t in tasks"
+            :key="t.id"
+            type="button"
+            class="task-item"
+            :class="{ active: t.id === activeTaskId }"
+            @click="selectTask(t.id)"
           >
-            <el-menu-item
-              v-for="t in tasks"
-              :key="t.id"
-              :index="String(t.id)"
-              class="task-item"
-            >
-              <el-tag :type="statusTagType(t.status)" size="small" class="task-tag">
-                {{ t.status }}
-              </el-tag>
-              <div class="task-text">
-                <div class="task-name" :title="taskLabel(t)">{{ taskLabel(t) }}</div>
-                <div class="task-sub">
-                  重试 {{ t.attempts }}/{{ t.max_attempts }} · {{ formatTime(t.dispatch_time) }}
-                </div>
-              </div>
-            </el-menu-item>
-          </el-menu>
+            <span class="gj-pill task-pill" :class="statusPillClass(t.status)">
+              {{ statusLabel(t.status) }}
+            </span>
+            <span class="task-text">
+              <span class="task-name" :title="taskLabel(t)">{{ taskLabel(t) }}</span>
+              <span class="task-sub">
+                重试 {{ t.attempts }}/{{ t.max_attempts }} · {{ formatTime(t.dispatch_time) }}
+              </span>
+            </span>
+          </button>
           <el-empty
             v-if="!tasks.length"
             description="该实例暂无任务记录，可能仍在等待调度"
             :image-size="60"
           />
         </div>
-      </div>
+      </aside>
 
       <!-- 右侧：日志查看器 -->
-      <div class="main">
+      <section class="main">
         <div v-if="activeTask" class="log-head">
           <div class="log-head-main">
-            <el-tag :type="statusTagType(activeTask.status)" size="small">
-              {{ activeTask.status }}
-            </el-tag>
+            <span class="gj-pill" :class="statusPillClass(activeTask.status)">
+              {{ statusLabel(activeTask.status) }}
+            </span>
             <span class="log-title">任务 #{{ activeTask.id }}</span>
             <span class="meta">处理器 {{ activeTask.processor || '-' }}</span>
             <span class="meta">
@@ -260,111 +271,133 @@ function taskLabel(t: InstanceTask) {
             回到最新
           </el-button>
         </div>
-      </div>
+      </section>
     </div>
-  </el-card>
+  </div>
 </template>
 
 <style scoped>
-.page {
-  min-height: calc(100vh - 120px);
+.id-chip {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: var(--gj-primary-soft);
+  color: var(--gj-primary);
+  font-size: 11px;
+  font-weight: 500;
+  vertical-align: 2px;
 }
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
+.head-job {
+  font-weight: 600;
+  color: var(--gj-text-regular);
 }
-.left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.page-title {
-  margin: 0;
-}
-.meta {
-  font-size: 12px;
-  color: #909399;
+.meta-sep {
+  width: 1px;
+  height: 11px;
+  background: var(--gj-border);
 }
 .updated {
   font-size: 12px;
-  color: #909399;
+  color: var(--gj-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.meta {
+  font-size: 12px;
+  color: var(--gj-text-muted);
 }
 .body {
-  display: flex;
+  display: grid;
+  grid-template-columns: 288px minmax(0, 1fr);
   gap: 16px;
-  align-items: stretch;
-  height: calc(100vh - 240px);
-  min-height: 420px;
+  height: calc(100vh - 232px);
+  min-height: 460px;
 }
-.side {
-  width: 300px;
-  flex-shrink: 0;
-  border: 1px solid #ebeef5;
-  border-radius: 4px;
+.side,
+.main {
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--gj-border);
+  border-radius: var(--gj-radius);
+  background: var(--gj-surface);
 }
 .side-head {
-  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--gj-border-soft);
   font-size: 13px;
   font-weight: 600;
-  color: #303133;
-  border-bottom: 1px solid #ebeef5;
-  background: #fafafa;
+  color: var(--gj-text);
+}
+.side-count {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--gj-text-muted);
 }
 .side-scroll {
   flex: 1;
   overflow-y: auto;
 }
-.task-menu {
-  border-right: none;
-}
 .task-item {
-  height: auto;
-  padding: 10px 12px;
-  line-height: 1.4;
-  white-space: normal;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--gj-border-soft);
+  border-left: 3px solid transparent;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
 }
-.task-tag {
+.task-item:hover {
+  background: var(--gj-surface-subtle);
+}
+.task-item.active {
+  border-left-color: var(--gj-primary);
+  background: var(--gj-primary-soft);
+}
+.task-item:focus-visible {
+  outline: 2px solid var(--gj-primary);
+  outline-offset: -2px;
+}
+.task-pill {
   flex-shrink: 0;
-  margin-right: 8px;
+  margin-top: 1px;
 }
 .task-text {
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
 }
 .task-name {
   font-size: 13px;
-  color: #303133;
+  color: var(--gj-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .task-sub {
   font-size: 11px;
-  color: #909399;
+  color: var(--gj-text-muted);
+  font-variant-numeric: tabular-nums;
 }
 .main {
   flex: 1;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  border: 1px solid #ebeef5;
-  border-radius: 4px;
 }
 .log-head {
-  padding: 10px 12px;
-  border-bottom: 1px solid #ebeef5;
-  background: #fafafa;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--gj-border-soft);
+  background: var(--gj-surface-subtle);
 }
 .log-head-main {
   display: flex;
@@ -375,36 +408,38 @@ function taskLabel(t: InstanceTask) {
 .log-title {
   font-size: 13px;
   font-weight: 600;
-  color: #303133;
+  color: var(--gj-text);
 }
 .log-head-sub {
-  margin-top: 6px;
   display: flex;
-  gap: 16px;
   flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 7px;
 }
 .result {
-  margin-top: 6px;
   display: flex;
   align-items: baseline;
   gap: 8px;
+  margin-top: 7px;
 }
 .result code {
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  font-size: 12px;
-  background: #f5f7fa;
   padding: 1px 6px;
-  border-radius: 3px;
+  border: 1px solid var(--gj-border-soft);
+  border-radius: 4px;
+  background: var(--gj-surface);
+  font-family: var(--gj-mono);
+  font-size: 12px;
+  color: var(--gj-text-regular);
   word-break: break-all;
 }
 .viewer {
   flex: 1;
   overflow: auto;
-  padding: 10px 12px;
-  background: #1e1e1e;
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  padding: 12px 14px;
+  background: #0b1524;
+  font-family: var(--gj-mono);
   font-size: 12.5px;
-  line-height: 1.7;
+  line-height: 1.75;
 }
 .line {
   display: flex;
@@ -414,47 +449,62 @@ function taskLabel(t: InstanceTask) {
   word-break: break-all;
 }
 .ts {
-  color: #7f8c98;
   flex-shrink: 0;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
 }
 .seq {
-  color: #5a6570;
   flex-shrink: 0;
+  color: #475569;
 }
 .lv {
   flex-shrink: 0;
-  width: 52px;
+  width: 44px;
 }
 .msg {
-  color: #d4d4d4;
+  color: #cbd5e1;
 }
 .lv-debug,
 .msg.lv-debug {
-  color: #808080;
+  color: #94a3b8;
 }
 .lv-info,
 .msg.lv-info {
-  color: #d4d4d4;
+  color: #cbd5e1;
 }
 .lv-warn,
 .msg.lv-warn {
-  color: #e6a23c;
+  color: #fbbf24;
 }
 .lv-error,
 .msg.lv-error {
-  color: #f56c6c;
+  color: #f87171;
 }
 .empty {
-  color: #7f8c98;
+  color: #64748b;
   font-size: 12px;
 }
 .stick-bar {
-  border-top: 1px solid #ebeef5;
-  padding: 2px 8px;
-  background: #fafafa;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  padding: 3px 14px;
+  border-top: 1px solid var(--gj-border-soft);
+  background: var(--gj-surface-subtle);
+}
+
+@media (max-width: 900px) {
+  .body {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+  .side {
+    max-height: 240px;
+  }
+  .main {
+    height: calc(100vh - 300px);
+    min-height: 420px;
+  }
 }
 </style>

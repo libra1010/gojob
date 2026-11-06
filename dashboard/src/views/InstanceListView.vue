@@ -6,7 +6,7 @@ import { listInstances, stopInstance } from '@/api/instance'
 import type { JobInstance } from '@/api/types'
 import InstanceDetailDialog from '@/components/InstanceDetailDialog.vue'
 import { useAuthStore } from '@/stores/auth'
-import { formatTime, statusTagType } from '@/utils/format'
+import { formatTime, statusLabel, statusPillClass } from '@/utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -74,94 +74,127 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <el-card shadow="never">
-    <div class="toolbar">
-      <div class="left">
-        <el-button link @click="router.back()">‹ 返回任务</el-button>
-        <h3 class="page-title">执行实例 · 任务 #{{ jobId }}</h3>
+  <div class="instances-page">
+    <div class="gj-page-head">
+      <div class="gj-page-head__main">
+        <button type="button" class="gj-back" @click="router.back()">‹ 返回任务</button>
+        <h3 class="gj-page-title">
+          执行实例
+          <span class="job-chip">任务 #{{ jobId }}</span>
+        </h3>
+        <div class="gj-page-sub">
+          <span>每 10 秒自动刷新 · 上次 {{ lastUpdated || '-' }}</span>
+          <span class="meta-sep" />
+          <span>共 {{ instances.length }} 条</span>
+        </div>
       </div>
-      <div class="right">
-        <span class="updated">每 10 秒自动刷新 · 上次 {{ lastUpdated || '-' }}</span>
+      <div class="gj-page-actions">
         <el-button size="small" :loading="loading" @click="load()">刷 新</el-button>
       </div>
     </div>
 
-    <el-table :data="instances" v-loading="loading" stripe>
-      <el-table-column prop="id" label="实例 ID" width="90" />
-      <el-table-column prop="job_name" label="任务名" min-width="140" show-overflow-tooltip />
-      <el-table-column label="状态" width="100">
-        <template #default="{ row }">
-          <el-tag :type="statusTagType(row.status)" size="small">{{ row.status }}</el-tag>
+    <el-card shadow="never" class="table-card">
+      <el-table :data="instances" v-loading="loading" size="small">
+        <el-table-column label="实例" width="84">
+          <template #default="{ row }"><span class="gj-mono">#{{ row.id }}</span></template>
+        </el-table-column>
+        <el-table-column prop="job_name" label="任务名" min-width="140" show-overflow-tooltip />
+        <el-table-column label="状态" width="96">
+          <template #default="{ row }">
+            <span class="gj-pill" :class="statusPillClass(row.status)">
+              {{ statusLabel(row.status) }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="来源" width="108">
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="row.source === 'DEPENDENCY'"
+              :content="`上游实例 #${row.upstream_instance_id ?? '-'} 执行成功后自动触发`"
+              placement="top"
+            >
+              <el-tag type="success" size="small" effect="plain">依赖</el-tag>
+            </el-tooltip>
+            <el-tag
+              v-else-if="row.source === 'API'"
+              type="warning"
+              size="small"
+              effect="plain"
+            >手动</el-tag>
+            <el-tag v-else size="small" effect="plain" type="info">定时</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="processor" label="处理器" min-width="170" show-overflow-tooltip />
+        <el-table-column label="重试次数" width="90">
+          <template #default="{ row }"><span class="gj-num">{{ row.try_times }}</span></template>
+        </el-table-column>
+        <el-table-column label="任务进度" width="110">
+          <template #default="{ row }">
+            <span class="gj-num progress">
+              {{ row.total_task_num - row.failed_task_num }} / {{ row.total_task_num }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="创建时间" min-width="150">
+          <template #default="{ row }"><span class="time">{{ formatTime(row.create_time) }}</span></template>
+        </el-table-column>
+        <el-table-column label="操作" width="210" fixed="right">
+          <template #default="{ row }">
+            <div class="row-actions">
+              <el-button size="small" @click="openDetail(row)">详 情</el-button>
+              <el-button size="small" @click="router.push(`/instances/${row.id}/logs`)">日 志</el-button>
+              <el-button
+                v-if="stoppable(row) && auth.canWriteApp(row.app_id)"
+                size="small"
+                type="danger"
+                plain
+                @click="onStop(row)"
+              >停 止</el-button>
+            </div>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <el-empty description="暂无执行实例" :image-size="72" />
         </template>
-      </el-table-column>
-      <el-table-column prop="source" label="来源" width="120">
-        <template #default="{ row }">
-          <el-tag v-if="row.source === 'API'" type="warning" size="small" effect="plain">API</el-tag>
-          <el-tooltip
-            v-else-if="row.source === 'DEPENDENCY'"
-            :content="`上游实例 #${row.upstream_instance_id ?? '-'} 执行成功后自动触发`"
-            placement="top"
-          >
-            <el-tag type="success" size="small" effect="plain">DEPENDENCY</el-tag>
-          </el-tooltip>
-          <el-tag v-else size="small" effect="plain">{{ row.source || 'CRON' }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="processor" label="处理器" min-width="170" show-overflow-tooltip />
-      <el-table-column label="重试次数" width="90">
-        <template #default="{ row }">{{ row.try_times }}</template>
-      </el-table-column>
-      <el-table-column label="任务进度" width="110">
-        <template #default="{ row }">{{ row.total_task_num - row.failed_task_num }} / {{ row.total_task_num }}</template>
-      </el-table-column>
-      <el-table-column label="创建时间" min-width="160">
-        <template #default="{ row }">{{ formatTime(row.create_time) }}</template>
-      </el-table-column>
-      <el-table-column label="操作" width="230" fixed="right">
-        <template #default="{ row }">
-          <el-button size="small" @click="openDetail(row)">详 情</el-button>
-          <el-button size="small" @click="router.push(`/instances/${row.id}/logs`)">日 志</el-button>
-          <el-button
-            v-if="stoppable(row) && auth.canWriteApp(row.app_id)"
-            size="small"
-            type="danger"
-            plain
-            @click="onStop(row)"
-            >停 止</el-button
-          >
-        </template>
-      </el-table-column>
-      <template #empty>
-        <el-empty description="暂无执行实例" />
-      </template>
-    </el-table>
-  </el-card>
+      </el-table>
+    </el-card>
+  </div>
 
   <InstanceDetailDialog v-model="detailOpen" :instance-id="detailId" />
 </template>
 
 <style scoped>
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 4px;
+.job-chip {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: var(--gj-primary-soft);
+  color: var(--gj-primary);
+  font-size: 11px;
+  font-weight: 500;
+  vertical-align: 2px;
 }
-.left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.meta-sep {
+  width: 1px;
+  height: 11px;
+  background: var(--gj-border);
 }
-.right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.table-card :deep(.el-card__body) {
+  padding: 6px 16px 12px;
 }
-.updated {
+.progress {
   font-size: 12px;
-  color: #909399;
+  color: var(--gj-text-regular);
 }
-.page-title {
-  margin: 0;
+.time {
+  font-size: 12px;
+  color: var(--gj-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 </style>

@@ -52,7 +52,7 @@ watch(
   <el-drawer
     :model-value="modelValue"
     :title="`在线机器 - ${appId}`"
-    size="720px"
+    size="860px"
     @update:model-value="emit('update:modelValue', $event)"
   >
     <div class="toolbar">
@@ -60,27 +60,27 @@ watch(
       <span class="count">共 {{ workers.length }} 个在线节点</span>
     </div>
     <el-table :data="workers" v-loading="loading" size="small" stripe>
-      <el-table-column prop="address" label="地址" min-width="180" show-overflow-tooltip />
-      <el-table-column label="SDK 类型" width="150">
+      <el-table-column prop="address" label="地址" min-width="160" show-overflow-tooltip />
+      <el-table-column label="SDK 类型" width="88">
         <template #default="{ row }">
           <el-tag :type="sdkTagType(row.sdk_type)" size="small">{{ row.sdk_type }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="接单" width="110">
+      <el-table-column label="接单" width="100">
         <template #default="{ row }">
           <el-tag v-if="row.accept_tasks" type="success" size="small" effect="plain">接单中</el-tag>
           <el-tag v-else type="warning" size="small" effect="plain">已停止接单</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="version" label="版本" width="110" />
-      <el-table-column label="CPU 负载" width="90">
+      <el-table-column prop="version" label="版本" width="104" show-overflow-tooltip />
+      <el-table-column label="CPU 负载" width="84">
         <template #default="{ row }">{{ Number(row.cpu_load).toFixed(2) }}</template>
       </el-table-column>
-      <el-table-column label="内存(MB)" width="90">
+      <el-table-column label="内存(MB)" width="76">
         <template #default="{ row }">{{ Number(row.memory_used).toFixed(1) }}</template>
       </el-table-column>
-      <el-table-column prop="instance_id" label="实例 ID" min-width="200" show-overflow-tooltip />
-      <el-table-column v-if="auth.canWrite" label="操作" width="110" fixed="right">
+      <el-table-column prop="instance_id" label="实例 ID" min-width="108" show-overflow-tooltip />
+      <el-table-column v-if="auth.canWrite" label="操作" width="92" fixed="right">
         <template #default="{ row }">
           <el-button
             size="small"
@@ -117,12 +117,12 @@ watch(
   margin-bottom: 12px;
 }
 .count {
-  color: #909399;
+  color: var(--gj-text-muted);
   font-size: 13px;
 }
 .tip {
   margin: 12px 0 0;
-  color: #909399;
+  color: var(--gj-text-muted);
   font-size: 12px;
   line-height: 1.6;
 }
