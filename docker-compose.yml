@@ -32,7 +32,6 @@ services:
         BUILD_TARGET: gojob-server
         GOJOB_VERSION: ${GOJOB_VERSION:-dev}
     image: gojob/gojob-server:latest
-    command: ["/app/gojob-server"]
     ports:
       - "7800:7800"
     environment:
@@ -133,7 +132,6 @@ services:
       args:
         BUILD_TARGET: gojob-demo
     image: gojob/gojob-demo:latest
-    command: ["/app/gojob-demo"]
     environment:
       GOJOB_WORKER_SERVER: http://gojob-server:7800
       GOJOB_WORKER_APP: ${GOJOB_DEMO_APP_ID:-demo_app}
@@ -161,7 +159,6 @@ services:
         BUILD_TARGET: gojob-agent
         GOJOB_VERSION: ${GOJOB_VERSION:-dev}
     image: gojob/gojob-agent:latest
-    command: ["/app/gojob-agent"]
     environment:
       GOJOB_WORKER_SERVER: http://gojob-server:7800
       GOJOB_WORKER_APP: ${GOJOB_DEMO_APP_ID:-demo_app}

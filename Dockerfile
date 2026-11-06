@@ -17,9 +17,14 @@ RUN CGO_ENABLED=0 go build -trimpath \
 
 FROM alpine:3.20
 ARG BUILD_TARGET=gojob-server
-RUN adduser -D -u 10001 gojob
+# 容器以非 root 运行：先建好可写目录，named volume 首次挂载时会继承这里的属主
+RUN adduser -D -u 10001 gojob \
+ && mkdir -p /app/data /var/lib/gojob/agent \
+ && chown -R gojob:gojob /app /var/lib/gojob
 WORKDIR /app
 COPY --from=build /out/app /app/${BUILD_TARGET}
+# exec 形式不展开变量，固定软链给 ENTRYPOINT 用；目标名保留便于排查
+RUN ln -s /app/${BUILD_TARGET} /app/gojob
 USER gojob
 # 只有服务端监听端口：demo worker 与 gojob-agent 都不开任何端口
 # （它们只出站访问 Server，优雅下线走 SDK 方法或控制台的「停止接单」开关）。
@@ -27,4 +32,4 @@ EXPOSE 7800
 # 刻意不在镜像里写 HEALTHCHECK：三个 target 监听不同端口，镜像级健康检查会让 demo/agent
 # 容器因为探不到 7800 而恒为 unhealthy。健康检查归编排层管——docker-compose.yml 里
 # gojob-server 那节有针对 /healthz 的定义。
-ENTRYPOINT ["/app/${BUILD_TARGET}"]
+ENTRYPOINT ["/app/gojob"]

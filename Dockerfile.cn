@@ -36,11 +36,15 @@ RUN CGO_ENABLED=0 go build -trimpath \
 
 FROM ${ALPINE_IMAGE}
 ARG BUILD_TARGET=gojob-server
-RUN adduser -D -u 10001 gojob
+# 与 Dockerfile 一致：非 root 运行，预先建好可写目录并交给 gojob
+RUN adduser -D -u 10001 gojob \
+ && mkdir -p /app/data /var/lib/gojob/agent \
+ && chown -R gojob:gojob /app /var/lib/gojob
 WORKDIR /app
 COPY --from=build /out/app /app/${BUILD_TARGET}
+RUN ln -s /app/${BUILD_TARGET} /app/gojob
 USER gojob
 EXPOSE 7800
 # 与 Dockerfile 同一条决定：镜像里刻意不写 HEALTHCHECK（三个 target 端口不同，写了会让
 # demo/agent 容器恒为 unhealthy）。健康检查归编排层管，见 docker-compose.yml。
-ENTRYPOINT ["/app/${BUILD_TARGET}"]
+ENTRYPOINT ["/app/gojob"]
