@@ -183,7 +183,10 @@ services:
         condition: service_healthy
 
   dashboard:
-    build: ./dashboard
+    # context 必须是仓库根：Dockerfile 要同时拷 dashboard/ 与 deploy/nginx-dashboard.conf.template
+    build:
+      context: .
+      dockerfile: ${GOJOB_DASHBOARD_DOCKERFILE:-dashboard/Dockerfile}
     image: gojob/dashboard:latest
     ports:
       - "8080:80"

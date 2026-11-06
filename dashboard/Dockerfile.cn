@@ -1,0 +1,25 @@
+# gojob dashboard 镜像的国内镜像版：与 dashboard/Dockerfile 只差基础镜像来源与 npm 源。
+# 构建命令与默认版相同，必须在仓库根目录执行（要同时拷 dashboard/ 与 deploy/ 模板）：
+#   docker build -f dashboard/Dockerfile.cn -t gojob/dashboard:latest .
+# 基础镜像 tag 由 SWR 搬运进度决定，撞上未同步时用 --build-arg 换一个即可。
+ARG NODE_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/node:24-alpine
+ARG NGINX_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/nginx:1.27-alpine
+
+FROM ${NODE_IMAGE} AS build
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+# Corepack 下载 pnpm 本体不读 npm registry，必须单独给 COREPACK_NPM_REGISTRY；
+# npm_config_registry 管随后的依赖安装。
+ENV COREPACK_NPM_REGISTRY=${NPM_REGISTRY} \
+    npm_config_registry=${NPM_REGISTRY}
+WORKDIR /src
+# workspace 文件里带 allowBuilds（esbuild/vue-demi），缺了它 pnpm 会拒绝安装
+COPY dashboard/package.json dashboard/pnpm-lock.yaml dashboard/pnpm-workspace.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile
+COPY dashboard/ .
+RUN pnpm build
+
+FROM ${NGINX_IMAGE}
+COPY deploy/nginx-dashboard.conf.template /etc/nginx/templates/default.conf.template
+COPY --from=build /src/dist /usr/share/nginx/html
+EXPOSE 80
+# 模板变量：GOJOB_UPSTREAM（默认 http://gojob-server:7800）

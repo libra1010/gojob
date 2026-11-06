@@ -53,3 +53,5 @@ pnpm preview    # 预览构建产物
 ```
 
 生产部署见根目录 `docker-compose.yml` 的 `dashboard` 服务：Nginx 托管静态资源并反代 `/openapi` 到 `GOJOB_UPSTREAM`（默认 `http://gojob-server:7800`），模板见 `../deploy/nginx-dashboard.conf.template`。
+
+构建镜像必须在**仓库根目录**（要同时拷 `dashboard/` 与 `deploy/`）：`docker build -f dashboard/Dockerfile -t gojob/dashboard:latest .`。docker.io 拉不动时改用 `dashboard/Dockerfile.cn`（SWR 基础镜像 + npmmirror），compose 里用 `GOJOB_DASHBOARD_DOCKERFILE=dashboard/Dockerfile.cn` 切换。

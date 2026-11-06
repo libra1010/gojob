@@ -49,7 +49,7 @@
 | `cmd/gojob-demo` | Go SDK 示例 Worker（hello / slow / failOnce 处理器） |
 | `cmd/gojob-agent` | 零代码执行节点：不写代码，只跑脚本库里预置的 Shell 脚本，见 `worker/README.md` |
 | `cmd/gojob-loadgen` | 容量与派发延迟的节点发生器（一台机器起 N 个真 worker 节点），供 `scripts/verify-capacity.sh` 用，见「容量实机数字」 |
-| `server/` | Server 内部分层：`api` `auth` `store` `scheduler` `registry` `dispatch` `cleanup`（历史实例回收）`cluster`（副本归属租约 + 跨副本唤醒信号）`node`（进程自监控） |
+| `server/` | Server 内部分层：`api` `auth` `store` `scheduler` `registry` `dispatch` `cleanup`（历史实例回收）`cluster`（副本归属租约 + 跨副本唤醒信号）`node`（进程自监控）`webui`（单镜像构建时内嵌控制台） |
 | `worker/` | Go Worker SDK（供业务进程内嵌） |
 | `internal/proc` | 跨平台进程指标原语（CPU 时间 / RSS / 打开 fd），Server 与 Go SDK 共用 |
 | `internal/agent` | Shell 脚本处理器（官方脚本处理器的对位实现）：脚本库解析、参数、超时、进程组取消 |
@@ -75,15 +75,17 @@ docker compose --profile postgres up -d
 GOJOB_SCRIPT_LIB=./scripts-lib docker compose --profile agent up -d
 ```
 
-**docker.io 拉不动的机器**（国内）改用镜像版 Dockerfile：基础镜像是华为云 SWR 的搬运副本，构建期模块代理走 goproxy.cn，其余（target / 构建参数 / 产物布局）与默认那份逐行一致。
+**docker.io 拉不动的机器**（国内）改用镜像版 Dockerfile：基础镜像是华为云 SWR 的搬运副本，服务端构建期模块代理走 goproxy.cn，dashboard 的 pnpm 本体与依赖走 npmmirror，其余与默认版一致。
 
 ```bash
-GOJOB_DOCKERFILE=Dockerfile.cn docker compose up -d --build
-# 或单独构建一个镜像：
+GOJOB_DOCKERFILE=Dockerfile.cn GOJOB_DASHBOARD_DOCKERFILE=dashboard/Dockerfile.cn \
+  docker compose up -d --build
+# 或单独构建服务端 / 控制台镜像：
 docker build -f Dockerfile.cn --build-arg BUILD_TARGET=gojob-server -t gojob/gojob-server:latest .
+docker build -f dashboard/Dockerfile.cn -t gojob/dashboard:latest .
 ```
 
-这个开关只覆盖我们自己构建的三个镜像（server / demo / agent）；`mysql`、`postgres`、`curlimages/curl` 是上游镜像，要换源得各自改 `image:` 或配 docker daemon 的 `registry-mirrors`。SWR 那两个 tag 由对方仓库同步进度决定，撞上"还没同步这个 tag"时用 `--build-arg ALPINE_IMAGE=…/alpine:3.20` 换一个即可，不必改文件。
+这两个开关只覆盖我们自己构建的四个镜像（server / demo / agent / dashboard）；`mysql`、`postgres`、`curlimages/curl` 是上游镜像，要换源得各自改 `image:` 或配 docker daemon 的 `registry-mirrors`。SWR 的 tag 由对方仓库同步进度决定，撞上"还没同步这个 tag"时用 `--build-arg ALPINE_IMAGE=…/alpine:3.20`（dashboard 用 `NODE_IMAGE` / `NGINX_IMAGE`）换一个即可，不必改文件。
 
 启动后：
 - 控制台 <http://localhost:8080>，默认账号 `admin / admin123`（**上线第一件事就是改密码**）
@@ -105,6 +107,26 @@ go run ./cmd/gojob-demo   # 读取 GOJOB_WORKER_* 环境变量或默认值
 # 3) 起控制台（另开终端）
 cd dashboard && pnpm install && pnpm dev   # http://localhost:5173
 ```
+
+### 方式三：单镜像（控制台内嵌）
+
+把控制台产物经 `go:embed` 编进 gojob-server，一个容器、一个端口同时提供页面与 API，不用再管 nginx 反代和 dashboard 镜像。
+
+```bash
+# 默认版（基础镜像取自 docker.io）
+docker build -f Dockerfile.all -t gojob/gojob-all:latest .
+
+# 国内网络：基础镜像走华为云 SWR，pnpm 本体与依赖走 npmmirror，模块代理走 goproxy.cn
+docker build -f Dockerfile.all.cn -t gojob/gojob-all:latest .
+
+docker run -d --name gojob -p 7800:7800 -v gojob-data:/app/data gojob/gojob-all:latest
+```
+
+- 控制台与 API 同在 <http://localhost:7800>，默认账号 `admin / admin123`（首启播种）
+- 健康探针 `/healthz`；sqlite 数据落在 `gojob-data` 卷的 `/app/data` 下
+- 换 MySQL / PostgreSQL：追加 `-e GOJOB_DB_DRIVER=mysql -e GOJOB_DB_DSN='…'`（DSN 格式见「数据库 DSN 格式」）
+
+内嵌只发生在带 `-tags dashboard` 的构建里（两个 `Dockerfile.all*` 已带上）；`go build ./cmd/gojob-server`、`go run` 和 compose 多镜像跑法不受影响。`server/webui/dist` 不进仓库，改完控制台重新构建镜像即可。
 
 ## 接入自己的应用
 

@@ -1,7 +1,8 @@
 # gojob dashboard（Vue3 + Vite，构建产物由 nginx 托管并反代 API）
 FROM node:24-alpine AS build
 WORKDIR /src
-COPY dashboard/package.json dashboard/pnpm-lock.yaml ./
+# workspace 文件里带 allowBuilds（esbuild/vue-demi），缺了它 pnpm 会拒绝安装
+COPY dashboard/package.json dashboard/pnpm-lock.yaml dashboard/pnpm-workspace.yaml ./
 RUN corepack enable && pnpm install --frozen-lockfile
 COPY dashboard/ .
 RUN pnpm build

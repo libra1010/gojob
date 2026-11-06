@@ -1,0 +1,44 @@
+# 单镜像（国内网络版）：与 Dockerfile.all 只差基础镜像来源与依赖源。
+#   docker build -f Dockerfile.all.cn -t gojob/gojob-all:latest .
+# 基础镜像 tag 撞上 SWR 未同步时用 --build-arg 换一个即可。
+ARG GO_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/golang:1.27.1-alpine
+ARG NODE_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/node:24-alpine
+ARG RUNTIME_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/alpine:3.24.0
+
+FROM ${NODE_IMAGE} AS ui
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+# Corepack 下载 pnpm 本体不读 npm registry，必须单独给 COREPACK_NPM_REGISTRY；
+# npm_config_registry 管随后的依赖安装。
+ENV COREPACK_NPM_REGISTRY=${NPM_REGISTRY} \
+    npm_config_registry=${NPM_REGISTRY}
+WORKDIR /src
+# workspace 文件里带 allowBuilds（esbuild/vue-demi），缺了它 pnpm 会拒绝安装
+COPY dashboard/package.json dashboard/pnpm-lock.yaml dashboard/pnpm-workspace.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile
+COPY dashboard/ .
+RUN pnpm build
+
+FROM ${GO_IMAGE} AS build
+ARG GOJOB_VERSION=dev
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=${GOPROXY}
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+COPY --from=ui /src/dist ./server/webui/dist
+RUN CGO_ENABLED=0 go build -trimpath -tags dashboard \
+      -ldflags="-s -w -X main.version=${GOJOB_VERSION}" \
+      -o /out/app ./cmd/gojob-server
+
+FROM ${RUNTIME_IMAGE}
+RUN adduser -D -u 10001 gojob \
+ && mkdir -p /app/data \
+ && chown -R gojob:gojob /app
+WORKDIR /app
+COPY --from=build /out/app /app/gojob
+# 默认 DSN 是相对路径，固定在 data 目录，挂 named volume 才能持久化
+ENV GOJOB_DB_DSN=/app/data/gojob.db
+USER gojob
+EXPOSE 7800
+ENTRYPOINT ["/app/gojob"]

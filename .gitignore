@@ -9,6 +9,9 @@ dashboard/node_modules/
 dashboard/dist/
 dashboard/.vite/
 
+# 单镜像构建时由 Dockerfile.all 拷入 server/webui/dist，本地不提交
+server/webui/dist/
+
 # Java SDK 构建产物（mvn 输出，不进版本库）
 sdk-java/**/target/
 sdk-java/.mvn/wrapper/maven-wrapper.jar

@@ -25,6 +25,7 @@ import (
 	"gojob/server/registry"
 	"gojob/server/scheduler"
 	"gojob/server/store"
+	"gojob/server/webui"
 )
 
 type Server struct {
@@ -131,6 +132,11 @@ func (s *Server) Router(mid ...gin.HandlerFunc) *gin.Engine {
 
 	// OpenAPI 兼容层（/openApi，注意大小写与 /openapi 不冲突）
 	s.registerOpenAPICompat(r)
+
+	// 单镜像构建才有内嵌控制台；默认构建 FS() 返回 false，路由保持不变。
+	if files, ok := webui.FS(); ok {
+		webui.Register(r, files)
+	}
 	return r
 }
 
