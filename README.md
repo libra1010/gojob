@@ -237,13 +237,14 @@ psql -U postgres < scripts/ddl/postgres.sql
 | 驱动 | DSN 示例 |
 | --- | --- |
 | `sqlite` | `./gojob.db`（文件路径，不存在会自动创建；整段 DSN 里没有 `_pragma` 时 Server 自动补 `busy_timeout(5000)`、WAL、`_txlock=immediate`，自己写就要三项写全） |
-| `mysql` | `gojob:gojob123@tcp(127.0.0.1:3306)/gojob?charset=utf8mb4&parseTime=True&loc=Local` |
+| `mysql` | `gojob:gojob123@tcp(127.0.0.1:3306)/gojob?charset=utf8mb4&parseTime=True&loc=UTC` |
 | `postgres` | `postgres://gojob:gojob123@127.0.0.1:5432/gojob?sslmode=disable`，或关键字写法 `host=127.0.0.1 port=5432 user=gojob password=gojob123 dbname=gojob sslmode=disable` |
 
 - MySQL 必须带 `parseTime=True`，否则 `DATETIME` 读不回 `time.Time`；链路加密加 `tls=true` 或 `tls=skip-verify`。
+- MySQL 的 `loc` 建议固定 `UTC`，别用 `Local`：`DATETIME` 存的是不带偏移的字面量，`loc` 决定按哪个时区读写它。`loc=Local` 会让存储跟着容器 `TZ` 漂——容器从 UTC 切到东八区时，存量行会被按新时区重读、整体偏 8 小时。固定 `UTC` 后库里永远是 UTC 时刻，日志/cron/前端再靠容器 `TZ=Asia/Shanghai` 显示北京时间，切换无损（SQLite 存带偏移的时刻，本就无损）。已有 `loc=Local` 且一直在 UTC 容器里跑的库，把 DSN 改成 `loc=UTC` 即可，存量不用迁。
 - PostgreSQL 本机/容器内用 `sslmode=disable`，托管库按服务商要求用 `require` / `verify-full`；URL 写法里口令含特殊字符要先百分号编码，或改用关键字写法。
 - `pgsql` / `postgresql` 等同 `postgres`，驱动留空按 `sqlite`。
-- compose 用 `--profile mysql` / `--profile postgres` 时，主机名要换成服务名：`mysql:3306` / `postgres:5432`。例如 `.env` 里写 `GOJOB_DB_DRIVER=mysql`、`GOJOB_DB_DSN=gojob:gojob123@tcp(mysql:3306)/gojob?charset=utf8mb4&parseTime=True&loc=Local`。
+- compose 用 `--profile mysql` / `--profile postgres` 时，主机名要换成服务名：`mysql:3306` / `postgres:5432`。例如 `.env` 里写 `GOJOB_DB_DRIVER=mysql`、`GOJOB_DB_DSN=gojob:gojob123@tcp(mysql:3306)/gojob?charset=utf8mb4&parseTime=True&loc=UTC`。
 
 Worker 侧示例进程读取：`GOJOB_WORKER_SERVER` / `GOJOB_WORKER_APP` / `GOJOB_WORKER_PASSWORD`，以及 `GOJOB_WORKER_AES_KEY`（与服务端某一把 key 一致即可，两侧只配 key、不配 kid）。零代码执行节点 `gojob-agent` 另有 `GOJOB_AGENT_*` 六个变量（脚本库、内联开关、并发、工作目录、超时），清单与安全含义见 `worker/README.md`「零代码执行节点」与 `.env.example`。
 

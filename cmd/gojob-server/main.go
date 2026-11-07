@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+	// 内嵌 IANA 时区库：裸 alpine 没有 zoneinfo，缺了它 TZ=Asia/Shanghai 会被静默忽略、退回 UTC。
+	_ "time/tzdata"
 
 	"gojob/server/api"
 	"gojob/server/auth"
@@ -107,6 +109,12 @@ func main() {
 	envIntOverride("GOJOB_RETENTION_DAYS", retentionDays)
 	envOverride("GOJOB_WORKER_AES_KEYS", workerAESKeys)
 	envBoolOverride("GOJOB_WORKER_AES_REQUIRED", workerAESRequired)
+	// 时区自检：TZ 解析失败（镜像缺 tzdata、名字拼错、CST-8 这类 POSIX 写法）时 Go 静默退回
+	// UTC，日志与 cron 全偏 8 小时——启动第一屏把解析结果喊出来，部署后一眼对账。
+	log.Printf("timezone: local=%s TZ=%q", time.Local, os.Getenv("TZ"))
+	if tz := os.Getenv("TZ"); tz != "" && tz != "UTC" && time.Local.String() == "UTC" {
+		log.Printf("WARNING: TZ=%q 未生效，仍按 UTC 运行（检查镜像 tzdata 与时区名拼写）", tz)
+	}
 	if *publicURL == "" {
 		host, port, err := net.SplitHostPort(*addr)
 		if err == nil {

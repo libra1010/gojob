@@ -17,6 +17,9 @@ RUN CGO_ENABLED=0 go build -trimpath \
 
 FROM alpine:3.20
 ARG BUILD_TARGET=gojob-server
+# 裸 alpine 没有 zoneinfo，Go 解析不了 TZ 就静默退回 UTC，注入 TZ=Asia/Shanghai 也无效。
+# 装上 tzdata 让注入的 TZ 可解析；镜像本身不设默认 TZ，默认仍是 UTC（.cn 版才默认东八区）。
+RUN apk add --no-cache tzdata
 # 容器以非 root 运行：先建好可写目录，named volume 首次挂载时会继承这里的属主
 RUN adduser -D -u 10001 gojob \
  && mkdir -p /app/data /var/lib/gojob/agent \

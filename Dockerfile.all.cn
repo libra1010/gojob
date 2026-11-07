@@ -1,4 +1,4 @@
-# 单镜像（国内网络版）：与 Dockerfile.all 只差基础镜像来源与依赖源。
+# 单镜像（国内网络版）：与 Dockerfile.all 差基础镜像来源、依赖源，外加运行阶段的默认 TZ（两者都装 tzdata）。
 #   docker build -f Dockerfile.all.cn -t gojob/gojob-all:latest .
 # 基础镜像 tag 撞上 SWR 未同步时用 --build-arg 换一个即可。
 ARG GO_IMAGE=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/library/golang:1.27.1-alpine
@@ -32,6 +32,11 @@ RUN CGO_ENABLED=0 go build -trimpath -tags dashboard \
       -o /out/app ./cmd/gojob-server
 
 FROM ${RUNTIME_IMAGE}
+# 时区：裸 alpine 没有 zoneinfo，Go 解析不了 TZ 就静默退回 UTC（机制详见 Dockerfile.cn
+# 运行阶段那段注释）。国内交付按东八区口径，所以这里装 tzdata 并给默认 TZ；
+# 编排层仍可用 env 覆盖。上游 Dockerfile.all 同样装了 tzdata 但不设默认 TZ，保持 UTC 口径。
+RUN apk add --no-cache tzdata
+ENV TZ=Asia/Shanghai
 RUN adduser -D -u 10001 gojob \
  && mkdir -p /app/data \
  && chown -R gojob:gojob /app
