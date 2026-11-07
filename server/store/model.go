@@ -136,7 +136,7 @@ type JobInfo struct {
 	ProcessorType      string `gorm:"size:32;default:'BUILT_IN'" json:"processor_type"`   // 兼容协议的 ProcessorType 枚举：BUILT_IN / EXTERNAL（SHELL/PYTHON 导入时已改写）
 	ExecuteType        string `gorm:"size:16;default:'STANDALONE'" json:"execute_type"`   // 一期仅 STANDALONE 生效
 	TimeExpressionType string `gorm:"size:24;default:'CRON'" json:"time_expression_type"` // CRON / FIXED_RATE / API
-	TimeExpression     string `gorm:"size:64" json:"time_expression"`
+	TimeExpression     string `gorm:"size:512" json:"time_expression"`
 	JobParams          string `gorm:"type:text" json:"job_params"`
 	InstanceParams     string `gorm:"type:text" json:"instance_params"` // 每次触发默认运行时参数
 	// 这三列不带 default 标签：0 都是有意义的配置（不重试 / 不限实例数），而 gorm 的 Create
@@ -226,7 +226,7 @@ type JobInstance struct {
 	TryTimes      int       `gorm:"default:0" json:"try_times"`
 	TotalTaskNum  int       `gorm:"default:0" json:"total_task_num"`
 	FailedTaskNum int       `gorm:"default:0" json:"failed_task_num"`
-	Source        string    `gorm:"size:16" json:"source"` // CRON / API / DEPENDENCY
+	Source        string    `gorm:"size:32" json:"source"` // CRON / FIXED_RATE / FIXED_DELAY / DAILY_TIME_INTERVAL / API / DEPENDENCY
 	CreateTime    time.Time `gorm:"index" json:"create_time"`
 	ModifyTime    time.Time `json:"modify_time"`
 }

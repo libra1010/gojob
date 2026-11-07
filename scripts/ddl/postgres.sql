@@ -138,7 +138,7 @@ CREATE TABLE IF NOT EXISTS job_infos (
   processor_type     VARCHAR(32)  NOT NULL DEFAULT 'BUILT_IN',   -- 兼容协议 ProcessorType：BUILT_IN/EXTERNAL（SHELL/PYTHON 已废弃，导入时改写）
   execute_type       VARCHAR(16)  NOT NULL DEFAULT 'STANDALONE',
   time_expression_type VARCHAR(24) NOT NULL DEFAULT 'CRON',      -- CRON/FIXED_RATE/FIXED_DELAY/DAILY_TIME_INTERVAL/API/WORKFLOW/DEPENDENCY(依赖触发,gojob 扩展)
-  time_expression    VARCHAR(64)  NOT NULL DEFAULT '',
+  time_expression    VARCHAR(512) NOT NULL DEFAULT '',    -- cron 或 DAILY_TIME_INTERVAL 的 JSON（约 130 字符）
   job_params         TEXT,
   instance_params    TEXT,                                     -- 运行时固定参数（兼容协议 instanceParams）
   max_retry_times    INT          NOT NULL DEFAULT 3,
@@ -180,7 +180,7 @@ CREATE TABLE IF NOT EXISTS job_instances (
   try_times       INT          NOT NULL DEFAULT 0,
   total_task_num  INT          NOT NULL DEFAULT 0,
   failed_task_num INT          NOT NULL DEFAULT 0,
-  source          VARCHAR(16)  NOT NULL DEFAULT '',  -- CRON/FIXED_RATE/FIXED_DELAY/DAILY_TIME_INTERVAL/API/WORKFLOW/DEPENDENCY
+  source          VARCHAR(32)  NOT NULL DEFAULT '',  -- CRON/FIXED_RATE/FIXED_DELAY/DAILY_TIME_INTERVAL/API/WORKFLOW/DEPENDENCY
   create_time     TIMESTAMPTZ(3) NULL,
   modify_time     TIMESTAMPTZ(3) NULL
 );
