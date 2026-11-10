@@ -27,7 +27,7 @@ func newDepFixture(t *testing.T) *depFixture {
 	f.sched = New(st, nil, func() {}, func(job *store.JobInfo) string {
 		f.picks = append(f.picks, job.ID)
 		return ""
-	}, nil)
+	}, nil, nil)
 	return f
 }
 

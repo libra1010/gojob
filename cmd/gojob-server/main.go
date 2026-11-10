@@ -179,7 +179,7 @@ func main() {
 
 	reg := registry.New(st.DB, 15*time.Second)
 	disp := dispatch.New(st, reg, sig)
-	sched := scheduler.New(st, leases, disp.Notify, disp.PickTarget, disp.BroadcastTargets)
+	sched := scheduler.New(st, leases, disp.Notify, disp.PickTarget, disp.BroadcastTargets, reg.HasWorkers)
 	// 失去归属 → 立刻撤掉该项目的时间轮，不再去撞 fencing。
 	leases.OnLost(sched.DropApp)
 	// 依赖触发：实例终态（事务已提交）回调调度器，成功则拉起下游实例。
@@ -275,6 +275,10 @@ func maintain(ctx context.Context, reg *registry.Registry, disp *dispatch.Dispat
 				log.Printf("maintain: %v", err)
 			}
 			if err := disp.ReleaseStaleTargets(time.Minute); err != nil {
+				log.Printf("maintain: %v", err)
+			}
+			// 排队超过 1 分钟、项目仍无在线节点的任务判失败：兜住"触发后节点立刻掉线"这类漏网。
+			if err := disp.FailOrphanedWaiting(time.Minute); err != nil {
 				log.Printf("maintain: %v", err)
 			}
 		}

@@ -34,6 +34,7 @@ WBIN=$WORK/gojob-demo
 pass=0 fail=0
 PIDS=()
 WLOG=()
+WPID=()
 TOKEN=
 
 ok()  { pass=$((pass+1)); echo "  PASS  $1"; }
@@ -132,13 +133,14 @@ ts=sorted(parse(i['create_time']) for i in json.load(sys.stdin)['data'] or [])
 print(sum(1 for a,b in zip(ts,ts[1:]) if (b-a).total_seconds()<0.5))
 "
 }
-# start_worker <序号> <app> <口令> <server 列表> —— drain 端口按序号错开，日志各自一个文件
+# start_worker <序号> <app> <口令> <server 列表> —— 每个 worker 一个日志与 PID（worker 不监听任何端口）
 start_worker() {
   local i=$1 app=$2 pw=$3 servers=$4
   local log=$WORK/w$i.log
   GOJOB_WORKER_APP=$app GOJOB_WORKER_PASSWORD=$pw GOJOB_WORKER_SERVER=$servers \
   "$WBIN" >"$log" 2>&1 &
   PIDS+=($!)
+  WPID[$i]=$!
   WLOG[$i]=$log
 }
 migrations() { # 该 worker 一共迁移过几次长轮询
@@ -317,7 +319,7 @@ S3=$(succeed_count "$D" "$J2")
 if [ "$N3" -ge 4 ] && [ "$S3" -ge 4 ]; then
   ok "任务照常：$N3 个实例、$S3 个执行成功（实例由连不上的 C 触发，经 D 下发给 worker）"
 else bad "坏提示把任务打断了（实例 $N3 / 成功 $S3）"; fi
-if [ -n "$(listen_pid 7890)" ]; then ok "worker 进程健在（没因为提示错误退出）"; else bad "worker 退出了"; fi
+if kill -0 "${WPID[20]}" 2>/dev/null; then ok "worker 进程健在（没因为提示错误退出）"; else bad "worker 退出了"; fi
 if [ "$(dup_pairs "$D" "$J2")" = "0" ]; then ok "坏地址场景下也没有双跑"; else bad "坏地址场景出现双跑"; fi
 FLIP=$(migrations "$W20")
 REJ=$(grep -c 'fail over to' "$W20" 2>/dev/null); REJ=${REJ:-0}

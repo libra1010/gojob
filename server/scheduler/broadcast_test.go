@@ -23,7 +23,7 @@ func newBroadcastFixture(t *testing.T, targets []string) (*store.Store, *Schedul
 	s := New(st, nil, func() {}, func(job *store.JobInfo) string {
 		picks = append(picks, job.ID)
 		return "should-not-be-used" // 广播不该走分发策略预选
-	}, func(*store.JobInfo) []string { return slices(targets) })
+	}, func(*store.JobInfo) []string { return slices(targets) }, nil)
 	return st, s, &picks
 }
 

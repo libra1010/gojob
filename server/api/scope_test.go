@@ -41,7 +41,7 @@ func newScopeEnv(t *testing.T) *scopeEnv {
 		auth.WorkerTokenTTL, auth.OpenAPITokenTTL)
 	s := New(st, reg, disp, scheduler.New(st, nil, func() {},
 		func(*store.JobInfo) string { return "" },
-		func(*store.JobInfo) []string { return nil }), as, nil, "sqlite", "")
+		func(*store.JobInfo) []string { return nil }, nil), as, nil, "sqlite", "")
 	now := store.Now()
 	for _, a := range []string{"app1", "app2"} {
 		hash, err := auth.HashPassword("pw")

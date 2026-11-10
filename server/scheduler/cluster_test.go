@@ -59,7 +59,7 @@ func (f *clusterFixture) sched(name string, leases *cluster.Leases, picks *[]uin
 			*picks = append(*picks, job.ID)
 		}
 		return ""
-	}, nil)
+	}, nil, nil)
 }
 
 func (f *clusterFixture) countInstances(t *testing.T, jobId uint64) int64 {

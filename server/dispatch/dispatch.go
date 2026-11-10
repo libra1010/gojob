@@ -287,8 +287,12 @@ func (d *Dispatcher) claim(req *protocol.FetchTaskReq, maxNum int) ([]protocol.T
 func candidates(tx *gorm.DB, req *protocol.FetchTaskReq, maxNum int) ([]store.InstanceTask, error) {
 	take := func(target string, limit int) ([]store.InstanceTask, error) {
 		var rows []store.InstanceTask
-		err := tx.Where("app_id = ? AND status = ? AND dispatch_time <= ? AND target_worker_id = ?",
-			req.AppId, protocol.TaskWaiting, store.Now(), target).
+		// 只发"实例还活着"的任务：实例已停止/结束、或任务已带停止意图的一律不下发。
+		// EXISTS 走 job_instances 主键，且只作用在 LIMIT 之前的候选行上，不改变认领热路径的量级。
+		err := tx.Where("app_id = ? AND status = ? AND dispatch_time <= ? AND target_worker_id = ? AND stop_request_time IS NULL"+
+			" AND EXISTS (SELECT 1 FROM job_instances i WHERE i.id = instance_tasks.instance_id AND i.status IN ?)",
+			req.AppId, protocol.TaskWaiting, store.Now(), target,
+			[]string{protocol.InstanceWaiting, protocol.InstanceRunning}).
 			Order("dispatch_time asc").Limit(limit).Find(&rows).Error
 		return rows, err
 	}
@@ -312,7 +316,7 @@ func takeRows(tx *gorm.DB, ids []uint64, workerId string, now time.Time) ([]uint
 	won := make([]uint64, 0, len(ids))
 	for _, id := range ids {
 		res := tx.Model(&store.InstanceTask{}).
-			Where("id = ? AND status = ?", id, protocol.TaskWaiting).
+			Where("id = ? AND status = ? AND stop_request_time IS NULL", id, protocol.TaskWaiting).
 			Updates(map[string]any{
 				"status": protocol.TaskRunning, "worker_id": workerId, "modify_time": now,
 			})
@@ -498,8 +502,9 @@ func (d *Dispatcher) ReassignLostTasks(olderThan time.Duration) error {
 			}
 			continue
 		}
+		// 快照之后才收到的停止指令不能再放回队列：留给下一轮 stopLost 直接按停止收尾。
 		res := d.st.DB.Model(&store.InstanceTask{}).
-			Where("id = ? AND status = ?", t.ID, protocol.TaskRunning).
+			Where("id = ? AND status = ? AND stop_request_time IS NULL", t.ID, protocol.TaskRunning).
 			Updates(map[string]any{"status": protocol.TaskWaiting, "worker_id": "",
 				"target_worker_id": "", "modify_time": now})
 		if res.Error != nil {

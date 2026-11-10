@@ -34,7 +34,7 @@ func TestDailyTimeIntervalCreatesInstances(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := New(st, nil, func() {}, nil, nil)
+	s := New(st, nil, func() {}, nil, nil, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 2800*time.Millisecond)
 	defer cancel()
 	s.Run(ctx)

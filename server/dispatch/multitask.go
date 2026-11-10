@@ -304,6 +304,11 @@ func (d *Dispatcher) MapTasks(req *protocol.MapTaskReq) (*protocol.MapTaskResp, 
 		if e := tx.First(&inst, t.InstanceId).Error; e != nil {
 			return struct{}{}, e
 		}
+		// 停止/已结束的实例不再接收新子任务：否则 map 出来的 WAITING 行会绕过
+		// StopInstance 当时那一次批量收尾，等 worker 来认领时用户已经点过停止。
+		if inst.Status != protocol.InstanceWaiting && inst.Status != protocol.InstanceRunning {
+			return struct{}{}, fmt.Errorf("实例 %d 当前状态为 %s，拒绝派生新子任务", inst.ID, inst.Status)
+		}
 		if !protocol.CanMap(inst.ExecuteType) {
 			return struct{}{}, fmt.Errorf("%w: 本实例执行类型为 %s", ErrNotMappable, inst.ExecuteType)
 		}

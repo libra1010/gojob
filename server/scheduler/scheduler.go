@@ -23,6 +23,9 @@ import (
 // ErrJobRunning 手动触发时任务仍在执行且开启了 SkipWhenRunning。
 var ErrJobRunning = errors.New("job is running and skip_when_running is enabled")
 
+// noWorkerResult 触发时项目没有在线节点的实例结果，对齐兼容协议的 NO_WORKER_AVAILABLE。
+const noWorkerResult = "无可用 worker：该项目当前没有在线节点"
+
 // SecondOptional：同时支持标准 5 段 cron 与兼容协议的 6 段秒级表达式风格
 var cronParser = cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour |
 	cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
@@ -156,6 +159,10 @@ type Scheduler struct {
 	// fanout 广播的落点集合：返回该项目下每个在线节点的 worker instance_id。
 	// 与 pick 的区别是它不做策略选择——"每台一份"本身就是分发结果，再选一次反而漏掉节点。
 	fanout func(*store.JobInfo) []string
+	// probeWorkers 项目当前是否有在线节点；nil = 不探测（测试/单机简化）。
+	// 触发时无在线节点就当场把实例判失败，对齐兼容协议的 no worker available，
+	// 不留在队列里等节点上线后补跑。
+	probeWorkers func(appId string) (bool, error)
 
 	wheel *Wheel
 	mu    sync.Mutex
@@ -167,16 +174,17 @@ type Scheduler struct {
 
 // New leases 传 nil 表示单副本部署（此时所有项目都归本机调度，行为与引入集群前完全一致）。
 func New(st *store.Store, leases *cluster.Leases, notify func(), pick func(*store.JobInfo) string,
-	fanout func(*store.JobInfo) []string) *Scheduler {
+	fanout func(*store.JobInfo) []string, probeWorkers func(appId string) (bool, error)) *Scheduler {
 	return &Scheduler{
-		st:     st,
-		leases: leases,
-		notify: notify,
-		pick:   pick,
-		fanout: fanout,
-		wheel:  NewWheel(wheelTickSize, wheelSlots),
-		armed:  make(map[uint64]time.Time),
-		appOf:  make(map[uint64]string),
+		st:           st,
+		leases:       leases,
+		notify:       notify,
+		pick:         pick,
+		fanout:       fanout,
+		probeWorkers: probeWorkers,
+		wheel:        NewWheel(wheelTickSize, wheelSlots),
+		armed:        make(map[uint64]time.Time),
+		appOf:        make(map[uint64]string),
 	}
 }
 
@@ -391,6 +399,19 @@ func (s *Scheduler) fire(job *store.JobInfo, next time.Time, source, instancePar
 	if job.ExecuteType == protocol.ExecuteBroadcast && s.fanout != nil {
 		broadcast = s.fanout(job)
 	}
+	// 广播除外：零节点广播按既有语义记 SUCCEED（根任务就是终态、不产生待领取任务），
+	// 本来就不会积压，不该被改判失败。
+	noWorker := false
+	if s.probeWorkers != nil && job.ExecuteType != protocol.ExecuteBroadcast {
+		ok, err := s.probeWorkers(job.AppId)
+		switch {
+		case err != nil:
+			// 探测失败按"有节点"处理：宁可排队，也不因一次查询抖动把整批实例判死。
+			log.Printf("probe workers for app %s: %v", job.AppId, err)
+		case !ok:
+			noWorker = true
+		}
+	}
 	_, err = s.st.Tx(func(tx *gorm.DB) (struct{}, error) {
 		if advances && s.leases != nil && !s.leases.Fence(tx, job.AppId) {
 			return struct{}{}, ErrTriggerTaken
@@ -441,12 +462,16 @@ func (s *Scheduler) fire(job *store.JobInfo, next time.Time, source, instancePar
 		if execType == "" {
 			execType = protocol.ExecuteStandalone
 		}
+		instStatus, instResult, runningTimes := protocol.InstanceWaiting, "", 1
+		if noWorker {
+			instStatus, instResult, runningTimes = protocol.InstanceFailed, noWorkerResult, 0
+		}
 		inst := store.JobInstance{
 			JobId: job.ID, AppId: job.AppId, JobName: job.JobName,
 			Processor: job.Processor, JobParams: job.JobParams,
-			Status: protocol.InstanceWaiting, Source: source, FixedParams: params,
+			Status: instStatus, Result: instResult, Source: source, FixedParams: params,
 			ExecuteType:  execType,
-			TotalTaskNum: 1, RunningTimes: 1,
+			TotalTaskNum: 1, RunningTimes: runningTimes,
 			CreateTime: now, ModifyTime: now,
 		}
 		if upstreamInstanceId > 0 {
@@ -460,13 +485,18 @@ func (s *Scheduler) fire(job *store.JobInfo, next time.Time, source, instancePar
 			return struct{}{}, e
 		}
 		instanceId = inst.ID
+		taskStatus, taskResult := protocol.TaskWaiting, ""
+		if noWorker {
+			taskStatus, taskResult = protocol.TaskFailed, noWorkerResult
+		}
 		task := store.InstanceTask{
 			JobId: job.ID, InstanceId: inst.ID, AppId: job.AppId,
 			Processor: job.Processor, JobParams: job.JobParams, FixedParams: params,
 			ProcessorType: job.ProcessorType, ExecuteType: execType,
 			TaskKey:      protocol.RootTaskKey,
 			TaskName:     protocol.RootTaskName,
-			Status:       protocol.TaskWaiting,
+			Status:       taskStatus,
+			Result:       taskResult,
 			Attempts:     1,
 			MaxAttempts:  job.MaxRetryTimes + 1,
 			LogLevel:     logLevel,
@@ -482,7 +512,7 @@ func (s *Scheduler) fire(job *store.JobInfo, next time.Time, source, instancePar
 				task.Result = fmt.Sprintf("广播 %d 个执行节点", len(broadcast))
 			}
 			task.ModifyTime = now
-		} else {
+		} else if !noWorker {
 			task.TargetWorkerId = target
 		}
 		if e := tx.Create(&task).Error; e != nil {
@@ -524,7 +554,10 @@ func (s *Scheduler) fire(job *store.JobInfo, next time.Time, source, instancePar
 		}
 		return struct{}{}, nil
 	})
-	if err == nil && !skipped {
+	if err == nil && !skipped && noWorker {
+		log.Printf("job %d: app %s has no online worker, instance %d failed fast", job.ID, job.AppId, instanceId)
+	}
+	if err == nil && !skipped && !noWorker {
 		s.notify()
 	}
 	return skipped, instanceId, err

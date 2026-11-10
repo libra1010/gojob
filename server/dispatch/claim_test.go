@@ -12,12 +12,25 @@ import (
 	"gorm.io/gorm"
 )
 
+// seedWaitingInstance 造一个仍然活着的实例：认领只发活动实例下的任务。
+func seedWaitingInstance(t testing.TB, st *store.Store, appId string) store.JobInstance {
+	t.Helper()
+	now := store.Now()
+	inst := store.JobInstance{JobId: 1, AppId: appId, Status: protocol.InstanceWaiting,
+		RunningTimes: 1, TotalTaskNum: 1, CreateTime: now, ModifyTime: now}
+	if err := st.DB.Create(&inst).Error; err != nil {
+		t.Fatalf("seed instance: %v", err)
+	}
+	return inst
+}
+
 func seedTasks(t testing.TB, st *store.Store, n int) []uint64 {
 	t.Helper()
+	inst := seedWaitingInstance(t, st, "app1")
 	now := store.Now()
 	ids := make([]uint64, 0, n)
 	for i := 0; i < n; i++ {
-		task := store.InstanceTask{JobId: 1, InstanceId: 1, AppId: "app1",
+		task := store.InstanceTask{JobId: 1, InstanceId: inst.ID, AppId: "app1",
 			Processor: "p.hello", Status: protocol.TaskWaiting, Attempts: 1, MaxAttempts: 1,
 			DispatchTime: now, CreateTime: now, ModifyTime: now}
 		if err := st.DB.Create(&task).Error; err != nil {
@@ -127,9 +140,10 @@ func TestClaimPrefersTasksTargetedAtThisWorker(t *testing.T) {
 	for _, w := range []string{"worker-A", "worker-B"} {
 		_ = reg.Alive(protocol.WorkerInfo{InstanceId: w, AppId: "app1", Address: "127.0.0.1:7799"})
 	}
+	inst := seedWaitingInstance(t, st, "app1")
 	now := store.Now()
 	add := func(target string, offset time.Duration) uint64 {
-		task := store.InstanceTask{JobId: 1, InstanceId: 1, AppId: "app1", Processor: "p.hello",
+		task := store.InstanceTask{JobId: 1, InstanceId: inst.ID, AppId: "app1", Processor: "p.hello",
 			Status: protocol.TaskWaiting, Attempts: 1, MaxAttempts: 1, TargetWorkerId: target,
 			DispatchTime: now.Add(offset), CreateTime: now, ModifyTime: now}
 		if err := st.DB.Create(&task).Error; err != nil {
