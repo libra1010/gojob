@@ -511,6 +511,11 @@ func TestBroadcastChildStaysOnItsPinnedWorker(t *testing.T) {
 		pinned[w] = kid.ID
 	}
 
+	// 两台都心跳停摆才算"失联回收"场景：节点还活着时在跑的任务不能被重派。
+	if err := st.DB.Model(&store.WorkerNode{}).Where("app_id = ?", "app1").
+		Update("last_heartbeat", store.Now().Add(-time.Hour)).Error; err != nil {
+		t.Fatal(err)
+	}
 	// 1) 失联回收：广播子任务不重派，直接判失败
 	if err := d.ReassignLostTasks(time.Minute); err != nil {
 		t.Fatalf("ReassignLostTasks: %v", err)
@@ -523,6 +528,12 @@ func TestBroadcastChildStaysOnItsPinnedWorker(t *testing.T) {
 	}
 	if c := getInst(t, st, instID); c.Status != protocol.InstanceFailed {
 		t.Fatalf("两份广播都失败后实例 = %s, want FAILED", c.Status)
+	}
+	// 回收完成后节点重新上线，后续认领才能通过存活校验
+	for _, w := range []string{"worker-A", "worker-B"} {
+		if err := d.reg.Alive(protocol.WorkerInfo{InstanceId: w, AppId: "app1", Address: w + ":7799"}); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// 2) 失败重试保留指名：重排队的行仍然只属于原来那台机器

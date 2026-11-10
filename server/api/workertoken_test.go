@@ -98,6 +98,12 @@ func (e *workerEnv) heartbeat(t *testing.T, instanceId, appId, tk string) protoc
 func (e *workerEnv) seedTask(t *testing.T, appId string, instanceId uint64) uint64 {
 	t.Helper()
 	now := store.Now()
+	// 认领层按 job_infos.enable 过滤：任务对应的 Job 必须存在且启用。
+	job := store.JobInfo{ID: 1, AppId: appId, JobName: "demo", Processor: "p.demo",
+		TimeExpressionType: "API", Enable: true, CreateTime: now, ModifyTime: now}
+	if err := e.s.st.DB.FirstOrCreate(&job, 1).Error; err != nil {
+		t.Fatal(err)
+	}
 	err := e.s.st.DB.Create(&store.JobInstance{ID: instanceId, JobId: 1, AppId: appId,
 		JobName: "demo", Processor: "p.demo", Status: protocol.InstanceWaiting,
 		TotalTaskNum: 1, Source: "API", CreateTime: now, ModifyTime: now}).Error

@@ -19,6 +19,13 @@ func newStore(t testing.TB) *store.Store {
 	if err := st.Migrate(); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	// 认领层按 job_infos.enable 硬过滤：默认造一个启用中的任务（ID=1），
+	// 各用例的实例/任务都以 JobId=1 关联；验暂停语义的用例把它改成 0。
+	job := store.JobInfo{ID: 1, AppId: "app1", JobName: "test-job", Enable: true,
+		CreateTime: store.Now(), ModifyTime: store.Now()}
+	if err := st.DB.Create(&job).Error; err != nil {
+		t.Fatalf("seed job: %v", err)
+	}
 	return st
 }
 

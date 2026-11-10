@@ -127,6 +127,43 @@ func (r *Registry) HasWorkers(appId string) (bool, error) {
 	return n > 0, err
 }
 
+// WorkerAlive 认领某任务的节点是否仍在心跳。失联回收靠它区分"任务跑得久"与"节点没了"：
+// task 的 dispatch_time 是入队时间，单看它会把长任务误判成失联并反复重派。
+// 查询失败按"仍在"处理：宁可晚回收，也不要在一次数据库抖动里把在跑的任务重派成双跑。
+func (r *Registry) WorkerAlive(appId, instanceId string) bool {
+	if instanceId == "" {
+		return false
+	}
+	var n int64
+	err := r.db.Model(&store.WorkerNode{}).
+		Where("app_id = ? AND instance_id = ? AND last_heartbeat > ?", appId, instanceId, r.deadline()).
+		Count(&n).Error
+	if err != nil {
+		log.Printf("registry: check worker %s/%s alive: %v", appId, instanceId, err)
+		return true
+	}
+	return n > 0
+}
+
+// Accepting 管理面是否允许该节点认领新任务（"停止接单"开关）。
+// 停接单的节点仍要能长轮询拿停止指令，所以只挡认领、不挡请求本身。
+// 心跳行不存在（注册后首跳之前）或列为空都按"接单"处理，与 acceptingSQL 的存量兜底一致。
+func (r *Registry) Accepting(appId, instanceId string) (bool, error) {
+	var rows []struct {
+		AcceptTasks *bool `gorm:"column:accept_tasks"`
+	}
+	err := r.db.Model(&store.WorkerNode{}).Select("accept_tasks").
+		Where("app_id = ? AND instance_id = ?", appId, instanceId).
+		Limit(1).Find(&rows).Error
+	if err != nil {
+		return false, err
+	}
+	if len(rows) == 0 || rows[0].AcceptTasks == nil {
+		return true, nil
+	}
+	return *rows[0].AcceptTasks, nil
+}
+
 // NodeSnapshot 一条在线节点记录，附带最后心跳时间与存活标记，供监控面/节点抽屉直接展示。
 type NodeSnapshot struct {
 	protocol.WorkerInfo

@@ -23,6 +23,10 @@ import (
 // ErrJobRunning 手动触发时任务仍在执行且开启了 SkipWhenRunning。
 var ErrJobRunning = errors.New("job is running and skip_when_running is enabled")
 
+// ErrJobPaused 暂停的任务不接受手动触发：认领层按 job_infos.enable 硬过滤，
+// 即使建出任务也永远拉不到，直接拒绝比留一个卡在 WAITING 的实例清楚。
+var ErrJobPaused = errors.New("任务已暂停，不能手动触发；请先恢复任务")
+
 // noWorkerResult 触发时项目没有在线节点的实例结果，对齐兼容协议的 NO_WORKER_AVAILABLE。
 const noWorkerResult = "无可用 worker：该项目当前没有在线节点"
 
@@ -565,12 +569,18 @@ func (s *Scheduler) fire(job *store.JobInfo, next time.Time, source, instancePar
 
 // TriggerManually 供 API 手动触发一次（不等 cron，不推进下次触发时间）。
 func (s *Scheduler) TriggerManually(job *store.JobInfo) error {
+	if !job.Enable {
+		return ErrJobPaused
+	}
 	_, _, err := s.fire(job, job.NextTriggerTime, "API", "", 0)
 	return err
 }
 
 // TriggerRun 与兼容协议的 runJob 语义一致：带运行时参数触发一次，返回新实例 ID。
 func (s *Scheduler) TriggerRun(job *store.JobInfo, instanceParams string) (uint64, error) {
+	if !job.Enable {
+		return 0, ErrJobPaused
+	}
 	_, id, err := s.fire(job, job.NextTriggerTime, "API", instanceParams, 0)
 	return id, err
 }

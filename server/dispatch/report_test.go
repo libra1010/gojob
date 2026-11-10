@@ -71,6 +71,12 @@ func TestLateReportAfterReassignIsIgnored(t *testing.T) {
 		Update("dispatch_time", store.Now().Add(-time.Hour)).Error; err != nil {
 		t.Fatal(err)
 	}
+	// "失联"以心跳为准：worker-A 注册过，这里把它的心跳推到过去才代表真的掉线。
+	if err := st.DB.Model(&store.WorkerNode{}).
+		Where("app_id = ? AND instance_id = ?", "app1", "worker-A").
+		Update("last_heartbeat", store.Now().Add(-time.Hour)).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	if err := d.ReassignLostTasks(10 * time.Minute); err != nil {
 		t.Fatalf("reassign: %v", err)

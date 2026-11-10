@@ -527,8 +527,10 @@ func (w *Worker) pollLoop(ctx context.Context) {
 		}
 		// 长轮询的超时 = 服务端最长阻塞时间 + 余量。没有它，被冻结的副本会把整个拉取循环
 		// 挂住 150s（hc 的兜底），期间既拿不到任务也收不到集群提示。
-		// 超时后被放弃的那一批任务已在 server 侧记为本节点持有，靠 ReassignLostTasks 回收重派，
-		// 所以这条路径是"至少一次 + 回报判重"，不是丢任务。
+		// 超时后被放弃的那一批任务已在 server 侧记为本节点持有：本节点失联时由
+		// ReassignLostTasks 回收重派；本节点一直在线、只是这一次响应没送达的任务不会
+		// 自动重派，会停在 RUNNING 等人工停止——服务端分不清"响应丢了"和"跑得久"，
+		// 宁可卡住也不并发双跑。
 		fctx, cancel := context.WithTimeout(ctx,
 			time.Duration(req.WaitSeconds)*time.Second+fetchGrace)
 		w.setPollCancel(cancel)

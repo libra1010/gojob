@@ -280,3 +280,33 @@ func TestDailyTimeIntervalPreviewMonotonic(t *testing.T) {
 		}
 	}
 }
+
+// 回归：服务停摆数小时后，next_trigger_time 已远在过去。DAILY_TIME_INTERVAL 若照
+// base+interval 继续算，结果仍落在过去，onFire 会在每个 tick 立即补一次——10s 间隔停
+// 3 小时就是单任务上千个实例，以写库速度连发。与 FIXED_RATE 同口径：从 now 起算，不追补。
+func TestDailyTimeIntervalStaleBaseDoesNotBurst(t *testing.T) {
+	now := time.Date(2026, 9, 23, 16, 0, 0, 0, time.Local)
+	stale := now.Add(-3 * time.Hour)
+
+	const expr = `{"interval":10,"intervalUnit":"SECONDS","startTimeOfDay":"00:00:00","endTimeOfDay":"23:59:59"}`
+	got, err := NextByType("DAILY_TIME_INTERVAL", expr, stale, now)
+	if err != nil {
+		t.Fatalf("stale: %v", err)
+	}
+	if !got.After(now) {
+		t.Fatalf("stale base next=%s 仍在 now(%s) 之前，onFire 会立即重挂造成连续追补", got, now)
+	}
+	if want := now.Add(10 * time.Second); !got.Equal(want) {
+		t.Fatalf("stale got %s want %s", got, want)
+	}
+
+	// 停机后当前时刻在窗口外：只顺延到下一个窗口，不补今天已错过的历史
+	const windowed = `{"interval":10,"intervalUnit":"SECONDS","startTimeOfDay":"09:00:00","endTimeOfDay":"10:00:00"}`
+	got, err = NextByType("DAILY_TIME_INTERVAL", windowed, stale, now)
+	if err != nil {
+		t.Fatalf("stale windowed: %v", err)
+	}
+	if want := time.Date(2026, 9, 24, 9, 0, 0, 0, time.Local); !got.Equal(want) {
+		t.Fatalf("stale windowed got %s want %s", got, want)
+	}
+}

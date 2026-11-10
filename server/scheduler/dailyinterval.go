@@ -144,10 +144,16 @@ func inDailyRange(t time.Time, start, end timeOfDay, days map[int]bool) (time.Ti
 }
 
 // nextDailyTimeInterval 每日固定间隔的下一次触发：基准 + 间隔后，吸附到最近的窗口内时刻。
+// 基准早于 now（例如服务停摆数小时）时从 now 起算，与 FIXED_RATE 同口径不追补历史：
+// 否则 base+interval 仍落在过去，时间轮会把它当成"立即到期"，每个 tick 补一个历史时刻，
+// 10s 间隔停 3 小时就是单任务上千个实例。
 func nextDailyTimeInterval(expr string, base, now time.Time) (time.Time, error) {
 	intervalMs, start, end, days, err := parseDailyInterval(expr)
 	if err != nil {
 		return time.Time{}, err
+	}
+	if base.Before(now) {
+		base = now
 	}
 	return inDailyRange(base.Add(time.Duration(intervalMs)*time.Millisecond), start, end, days)
 }

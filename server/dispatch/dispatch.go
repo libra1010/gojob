@@ -246,6 +246,13 @@ func (d *Dispatcher) claim(req *protocol.FetchTaskReq, maxNum int) ([]protocol.T
 	} else if !ok {
 		return nil, ErrNoWorker
 	}
+	// 管理面"停止接单"的节点仍要能长轮询拿停止指令，但不得再认领任何任务。
+	// 旧实现只靠分发策略不选它，自由池任务（target_worker_id=''）仍会被它领走。
+	if ok, err := d.reg.Accepting(req.AppId, req.InstanceId); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, nil
+	}
 	return d.st.Tx(func(tx *gorm.DB) ([]protocol.TaskDTO, error) {
 		tasks, err := candidates(tx, req, maxNum)
 		if err != nil {
@@ -287,12 +294,15 @@ func (d *Dispatcher) claim(req *protocol.FetchTaskReq, maxNum int) ([]protocol.T
 func candidates(tx *gorm.DB, req *protocol.FetchTaskReq, maxNum int) ([]store.InstanceTask, error) {
 	take := func(target string, limit int) ([]store.InstanceTask, error) {
 		var rows []store.InstanceTask
-		// 只发"实例还活着"的任务：实例已停止/结束、或任务已带停止意图的一律不下发。
-		// EXISTS 走 job_instances 主键，且只作用在 LIMIT 之前的候选行上，不改变认领热路径的量级。
+		// 只发"实例还活着且任务已启用"的任务：实例已停止/结束、任务已带停止意图、
+		// 或任务已被暂停（job_infos.enable=0）的一律不下发。暂停因此是拉取层的硬闸门，
+		// 不再依赖"暂停后不会再有新触发"这一条间接保证——已经排在队列里的任务也拉不到。
+		// 两个 EXISTS 都走主键，且只作用在 LIMIT 之前的候选行上，不改变认领热路径的量级。
 		err := tx.Where("app_id = ? AND status = ? AND dispatch_time <= ? AND target_worker_id = ? AND stop_request_time IS NULL"+
-			" AND EXISTS (SELECT 1 FROM job_instances i WHERE i.id = instance_tasks.instance_id AND i.status IN ?)",
+			" AND EXISTS (SELECT 1 FROM job_instances i WHERE i.id = instance_tasks.instance_id AND i.status IN ?)"+
+			" AND EXISTS (SELECT 1 FROM job_infos j WHERE j.id = instance_tasks.job_id AND j.enable = ?)",
 			req.AppId, protocol.TaskWaiting, store.Now(), target,
-			[]string{protocol.InstanceWaiting, protocol.InstanceRunning}).
+			[]string{protocol.InstanceWaiting, protocol.InstanceRunning}, true).
 			Order("dispatch_time asc").Limit(limit).Find(&rows).Error
 		return rows, err
 	}
@@ -443,7 +453,9 @@ func (d *Dispatcher) Report(ctx context.Context, req *protocol.ReportTaskReq) er
 	return err
 }
 
-// ReassignLostTasks 将失联 worker 上 RUNNING 超时任务收回队列（M2 完善判定，先留接口）。
+// ReassignLostTasks 回收认领节点已失联（心跳停止）且入队超过 olderThan 的 RUNNING 任务。
+// 节点仍在心跳的一律不动：dispatch_time 是入队时间，拿它当失联时长会把长任务每个维护
+// 周期重派一次；服务端也分不清"响应丢给活节点"与"任务只是跑得久"，此时先保证不双跑。
 // 已被请求停止的任务不复活重跑，直接就地置 STOPPED —— 否则宕机重启会把用户刚按下的停止又跑一遍。
 func (d *Dispatcher) ReassignLostTasks(olderThan time.Duration) error {
 	now := store.Now()
@@ -466,6 +478,12 @@ func (d *Dispatcher) ReassignLostTasks(olderThan time.Duration) error {
 	requeued, abandoned := 0, 0
 	for i := range lost {
 		t := lost[i]
+		// 节点心跳还在 ⇒ 任务只是跑得久。dispatch_time 是入队/上次重试时间，拿它当失联时长
+		// 会把在跑的长任务每个维护周期（30s）都重新入队一次：原执行还在跑，新副本被再拉起，
+		// 原副本的回报因归属已变被丢弃——同一条 ERP 长任务被反复并发执行。
+		if d.reg.WorkerAlive(t.AppId, t.WorkerId) {
+			continue
+		}
 		if t.TaskName == protocol.BroadcastTaskName {
 			res := d.st.DB.Model(&store.InstanceTask{}).
 				Where("id = ? AND status = ?", t.ID, protocol.TaskRunning).

@@ -167,6 +167,62 @@ func TestClaimPrefersTasksTargetedAtThisWorker(t *testing.T) {
 	}
 }
 
+// 暂停是拉取层的硬闸门：任务已经排在队列里，job 一旦 enable=0 就再也认领不到；
+// 恢复后照常可领。不能只依赖"暂停后不会再有新触发"——旧队列不会自己消失。
+func TestClaimSkipsTasksOfPausedJob(t *testing.T) {
+	st := newStore(t)
+	reg := registry.New(st.DB, time.Minute)
+	if err := reg.Alive(protocol.WorkerInfo{InstanceId: "worker-A", AppId: "app1", Address: "127.0.0.1:7799"}); err != nil {
+		t.Fatal(err)
+	}
+	d := New(st, reg, nil)
+	seedTasks(t, st, 2)
+
+	if err := st.DB.Model(&store.JobInfo{}).Where("id = ?", 1).Update("enable", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	got, err := d.claim(&protocol.FetchTaskReq{InstanceId: "worker-A", AppId: "app1", MaxTaskNum: 5}, 5)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("暂停后仍领到 %d 个任务：%+v", len(got), ids(got))
+	}
+
+	if err := st.DB.Model(&store.JobInfo{}).Where("id = ?", 1).Update("enable", true).Error; err != nil {
+		t.Fatal(err)
+	}
+	got, err = d.claim(&protocol.FetchTaskReq{InstanceId: "worker-A", AppId: "app1", MaxTaskNum: 5}, 5)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("恢复后应领到 2 个任务，实得 %d err=%v", len(got), err)
+	}
+}
+
+// 管理面"停止接单"后，这台节点连自由池任务也不能再领；别的节点照常。
+func TestClaimSkipsStoppedAcceptingWorker(t *testing.T) {
+	st := newStore(t)
+	reg := registry.New(st.DB, time.Minute)
+	for _, w := range []string{"worker-A", "worker-B"} {
+		if err := reg.Alive(protocol.WorkerInfo{InstanceId: w, AppId: "app1", Address: w + ":7799"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := New(st, reg, nil)
+	seedTasks(t, st, 2)
+
+	if n, err := reg.SetAccept("app1", "worker-A", false); err != nil || n != 1 {
+		t.Fatalf("SetAccept = %d, %v", n, err)
+	}
+	got, err := d.claim(&protocol.FetchTaskReq{InstanceId: "worker-A", AppId: "app1", MaxTaskNum: 5}, 5)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("停接单的节点仍领到 %d 个任务 err=%v", len(got), err)
+	}
+	got, err = d.claim(&protocol.FetchTaskReq{InstanceId: "worker-B", AppId: "app1", MaxTaskNum: 5}, 5)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("正常节点应领到 2 个任务，实得 %d err=%v", len(got), err)
+	}
+}
+
 func ids(tasks []protocol.TaskDTO) []uint64 {
 	out := make([]uint64, 0, len(tasks))
 	for _, t := range tasks {
