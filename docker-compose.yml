@@ -38,6 +38,9 @@ services:
       GOJOB_ADDR: ":7800"
       GOJOB_DB_DRIVER: ${GOJOB_DB_DRIVER:-sqlite}
       GOJOB_DB_DSN: ${GOJOB_DB_DSN:-/app/data/gojob.db}
+      # 连外部 RDS/托管库、账号只给增删改查时设 false：不执行任何 DDL，只核对表与列。
+      # 内置 mysql/postgres profile 用的是 MYSQL_USER/POSTGRES_USER 的库属主，有 DDL 权限，保持 true。
+      GOJOB_DB_AUTO_MIGRATE: ${GOJOB_DB_AUTO_MIGRATE:-true}
       GOJOB_ADMIN_USER: ${GOJOB_ADMIN_USER:-admin}
       GOJOB_ADMIN_PASSWORD: ${GOJOB_ADMIN_PASSWORD:-admin123}
       GOJOB_PUBLIC_URL: ${GOJOB_PUBLIC_URL:-http://localhost:7800}

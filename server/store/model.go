@@ -2,6 +2,10 @@ package store
 
 import "time"
 
+// 表结构（新增/删除列、改宽度/默认值/索引）变更时必须同步更新三份 DDL：
+// scripts/ddl/mysql.sql、scripts/ddl/postgres.sql、deploy/postgres-compose.sql，
+// 以及 server/README.md 的「存量库升级」ALTER 清单。新用户只执行 DDL，不看 AutoMigrate。
+
 type AppInfo struct {
 	ID uint64 `gorm:"primaryKey;autoIncrement" json:"id"`
 	// TokenEpoch 是该项目数据面/OpenAPI 令牌的吊销基线：无状态签名令牌里带着签发时的代号，

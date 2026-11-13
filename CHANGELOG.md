@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **`GOJOB_DB_AUTO_MIGRATE`（默认 `true`）**：设 `false` 时进程启动**不执行任何 DDL**，改为核对表与列是否齐备，缺了就在启动期点名缺哪张表/哪一列并指向 `scripts/ddl/*.sql` 与「存量库升级」清单。此前服务端每次启动都无条件跑 gorm `AutoMigrate`，而线上数据库账号按最小权限通常只有增删改查（没有 `ALTER`/`CREATE`），结果是**照 `scripts/ddl` 建好库、口令与驱动都配对，仍然起不来**：`migrate: Error 1142 ALTER command denied to user 'gojob'@... for table 'app_infos'`。实测（一次性 MySQL 8.0 容器，账号只授 `SELECT,INSERT,UPDATE,DELETE`）：默认路径复现该 1142，设 `false` 后启动通过 `/healthz`，登录→建项目→建任务全部落库，`max_retry_times=0`、`instance_num_limit=0` 这类显式零值没被 DDL 的 `DEFAULT 3` 顶掉。顺带纠正 `scripts/ddl/*.sql` 头部"与 GORM AutoMigrate 完全一致"的说法：DDL 比 struct 更严（实测 119 列 `NOT NULL`、84 列 `DEFAULT` 是 struct 没有的口径），带着 DDL 权限启动时 AutoMigrate 会试图把这些列放宽，所以线上应当用 `false` 而不是给业务账号加 `ALTER`
+
 ### 修复
 
 - **无节点时的触发不再积压历史实例**：触发时项目没有任何在线节点，实例与根任务当场记 `FAILED`（`无可用 worker`），不再留在队列里等节点上线后把几小时的陈旧实例按顺序跑一遍；计划时间照常推进，零节点广播保持 `SUCCEED` 语义。兜底巡检每 30s 把排队超 1 分钟且仍无在线节点的 `WAITING` 任务判失败，覆盖触发后节点立刻掉线

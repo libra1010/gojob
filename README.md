@@ -219,6 +219,7 @@ psql -U postgres < scripts/ddl/postgres.sql
 | `GOJOB_ADDR` | `-addr` | `:7800` | HTTP 监听地址 |
 | `GOJOB_DB_DRIVER` | `-driver` | `sqlite` | `sqlite` \| `mysql` \| `postgres` |
 | `GOJOB_DB_DSN` | `-dsn` | `./gojob.db` | 各驱动的 DSN，格式见下「数据库 DSN 格式」 |
+| `GOJOB_DB_AUTO_MIGRATE` | `-auto-migrate` | `true` | 启动时是否自动建表/改表（DDL）。线上账号按最小权限只有增删改查时设 `false`：本进程不执行任何 DDL，只核对 `scripts/ddl/*.sql` 建好的表与列，缺了就在启动期点名报错 |
 | `GOJOB_ADMIN_USER` | — | `admin` | 首次启动播种的管理员（仅 `user_infos` 为空时） |
 | `GOJOB_ADMIN_PASSWORD` | — | `admin123` | 管理员密码（bcrypt 存储） |
 | `GOJOB_PUBLIC_URL` | `-public-url` | 自动推导 | 本副本的**对外可达地址**：随心跳下发给 worker 作为长轮询目标（`cluster_hint`），同时在统计总览页展示。留空按监听地址推导（`0.0.0.0` 会换成本机出口 IP）；多副本部署时每副本各填自己"worker 打得通"的地址 |

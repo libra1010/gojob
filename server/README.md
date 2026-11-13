@@ -29,6 +29,7 @@ go run ./cmd/gojob-server -addr :7800 -driver sqlite -dsn ./gojob.db
 | `-addr` | `GOJOB_ADDR` | `:7800` | 监听地址 |
 | `-driver` | `GOJOB_DB_DRIVER` | `sqlite` | `sqlite` \| `mysql` \| `postgres` |
 | `-dsn` | `GOJOB_DB_DSN` | `gojob.db` | 对应驱动 DSN，格式见下「数据库 DSN」 |
+| `-auto-migrate` | `GOJOB_DB_AUTO_MIGRATE` | `true` | 启动时是否执行建表/改表 DDL。`false` 时本进程**不发任何 DDL**，只核对 `scripts/ddl/*.sql` 建出来的表与列，缺了就在启动期点名报错。线上账号只有增删改查权限（无 `ALTER`/`CREATE`）时必须设 `false`，见「数据库初始化」 |
 | `-admin-user` | `GOJOB_ADMIN_USER` | `admin` | 首启播种管理员（`user_infos` 为空时） |
 | `-admin-password` | `GOJOB_ADMIN_PASSWORD` | `admin123` | 播种密码（bcrypt 存储） |
 | `-public-url` | `GOJOB_PUBLIC_URL` | 自动推导 | 本副本的**对外可达地址**：随心跳下发给 worker 当长轮询目标（`cluster_hint`），并用于统计总览展示。多副本时各副本填自己那台"worker 打得通"的地址 |
@@ -58,6 +59,8 @@ MySQL 必须带 `parseTime=True`；`pgsql` / `postgresql` 与 `postgres` 等价�
 - **列的一条硬约定：凡是"0 是合法配置"的列，model 上不许出现 `default:` 标签。** gorm 的 `Create` 会跳过"带 `default` 标签且值为零"的列，把 0 交给库里的 `DEFAULT`——`job_infos.max_retry_times`(0=不重试)、`instance_retry_num`(同上)、`instance_num_limit`(0=不限制) 就因此被静默顶成 3，而且 `Create` 之后内存里的结构体仍是请求值，只有读回库里才看得见（实机表现：一个 0 重试的任务跑满 4 次尝试）。默认值统一由 API 层 `orUnset` 填；DDL 脚本里的 `DEFAULT 3` 保留，只服务外部导入，存量库不需要改。
 - mysql：首次部署导入 `../scripts/ddl/mysql.sql`。
 - postgres：首次部署导入 `../scripts/ddl/postgres.sql`。
+- **线上账号只有增删改查权限（没有 ALTER/CREATE）时设 `GOJOB_DB_AUTO_MIGRATE=false`**：本进程启动不执行任何 DDL，只核对表与列是否齐备，缺了就在启动期点名（`schema check: 库里缺少 表 app_infos, job_infos...`）并指回本节脚本。这条路径下 `scripts/ddl/*.sql` 就是唯一建表来源，升级新版本要先按下面「存量库升级」补 ALTER 再启动。
+  默认 `true` 走 gorm AutoMigrate。要知道 AutoMigrate 是**按 struct 口径**比对，而本节的 DDL 比 struct 更严（多数列写了 `NOT NULL` + `DEFAULT`，struct 刻意不带这些标签——见上面"0 是合法配置"那条硬约定），所以带着 DDL 权限启动时它会试图把这些列放宽：实测 `job_infos.time_expression` 之外还有 119 列 `NOT NULL`、84 列 `DEFAULT` 会被判定"该改"。**线上不要为了让 AutoMigrate 过去而给业务账号 DDL 权限**，用 `false`。
 - **存量库升级**（已有 mysql/pgsql 部署）：DDL 脚本只在初始化时执行，跟版本需要手工 ALTER，然后重启进程即可（`auth.UpgradeAppPasswords` 会在首启把明文项目密码升级成密文）：
 
 ```sql
@@ -68,6 +71,13 @@ ALTER TABLE job_instances  ADD COLUMN upstream_instance_id BIGINT UNSIGNED NULL;
 ALTER TABLE job_instances  ADD UNIQUE INDEX idx_job_upstream_instance (job_id, upstream_instance_id);
 ALTER TABLE job_infos      ADD COLUMN upstream_job_id BIGINT UNSIGNED NOT NULL DEFAULT 0;
 ALTER TABLE app_infos      MODIFY COLUMN password VARCHAR(128) NOT NULL DEFAULT '';
+-- DAILY_TIME_INTERVAL 的表达式是约 130 字符的 JSON；旧版 VARCHAR(64) 在 mysql/pgsql 上写不进去
+ALTER TABLE job_infos      MODIFY COLUMN time_expression VARCHAR(512) NOT NULL DEFAULT '';
+-- 实例来源新增 FIXED_RATE/FIXED_DELAY/DAILY_TIME_INTERVAL，旧版 VARCHAR(16) 装不下
+ALTER TABLE job_instances  MODIFY COLUMN source          VARCHAR(32)  NOT NULL DEFAULT '';
+-- PostgreSQL 对应写法：
+--   ALTER TABLE job_infos     ALTER COLUMN time_expression TYPE VARCHAR(512);
+--   ALTER TABLE job_instances ALTER COLUMN source          TYPE VARCHAR(32);
 -- 只有按旧版脚本建过库时才需要；password_md5 已废弃（库里不再存任何明文口令等价物）
 ALTER TABLE app_infos      DROP COLUMN password_md5;
 -- 节点监控：新表，直接执行 scripts/ddl/*.sql 里的 CREATE TABLE IF NOT EXISTS server_nodes 段

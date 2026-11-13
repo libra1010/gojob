@@ -94,6 +94,7 @@ func main() {
 	retentionDays := flag.Int("retention-days", 0, "历史实例保留天数：终态实例超过它就连同子任务、任务日志一起删；0=只认任务上配的 life_cycle；两边都不配则永不清理")
 	workerAESKeys := flag.String("worker-aes-keys", "", "注册口令加密的 AES-256 key，64 位 hex，逗号分隔多把只用于轮换期并存；留空=口令明文送上来（现状）")
 	workerAESRequired := flag.Bool("worker-aes-required", false, "配了 --worker-aes-keys 后进一步要求所有 worker/OpenAPI 注册必须走加密，明文注册直接拒绝")
+	autoMigrate := flag.Bool("auto-migrate", true, "启动时自动建表/改表（需要 DDL 权限）；线上账号只有增删改查权限时设 false，表结构以 scripts/ddl 为准")
 	flag.Parse()
 
 	envOverride("GOJOB_ADDR", addr)
@@ -109,6 +110,7 @@ func main() {
 	envIntOverride("GOJOB_RETENTION_DAYS", retentionDays)
 	envOverride("GOJOB_WORKER_AES_KEYS", workerAESKeys)
 	envBoolOverride("GOJOB_WORKER_AES_REQUIRED", workerAESRequired)
+	envBoolOverride("GOJOB_DB_AUTO_MIGRATE", autoMigrate)
 	// 时区自检：TZ 解析失败（镜像缺 tzdata、名字拼错、CST-8 这类 POSIX 写法）时 Go 静默退回
 	// UTC，日志与 cron 全偏 8 小时——启动第一屏把解析结果喊出来，部署后一眼对账。
 	log.Printf("timezone: local=%s TZ=%q", time.Local, os.Getenv("TZ"))
@@ -154,8 +156,16 @@ func main() {
 	}
 	log.Printf("db pool: max_open=%d max_idle=%d conn_max_lifetime=%s",
 		pool.MaxOpenConns, pool.MaxIdleConns, pool.MaxConnLifetime)
-	if err := st.Migrate(); err != nil {
-		log.Fatalf("migrate: %v", err)
+	if *autoMigrate {
+		if err := st.Migrate(); err != nil {
+			log.Fatalf("migrate: %v", err)
+		}
+	} else {
+		// 线上账号只有增删改查权限时走这条：不碰结构，只核对 DBA 建好的库。
+		log.Printf("db schema: auto-migrate=false，本进程不执行任何 DDL，表结构以 scripts/ddl 为准")
+		if err := st.PrepareSchema(); err != nil {
+			log.Fatalf("schema check: %v", err)
+		}
 	}
 	if created, err := auth.SeedAdmin(st, *adminUser, *adminPass); err != nil {
 		log.Fatalf("seed admin: %v", err)

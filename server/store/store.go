@@ -19,8 +19,39 @@ type Store struct {
 	DB *gorm.DB
 }
 
+// validateDSN 在驱动与 DSN 明显不匹配时给出可操作的错误。典型场景：切 MySQL/PG 时
+// 只改了 GOJOB_DB_DRIVER，DSN 还留着 Dockerfile / compose 的 sqlite 默认值，
+// 驱动会把 /app/data 当成网络名，报 "default addr for network '/app/data' unknown"。
+func validateDSN(driver, dsn string) error {
+	switch driver {
+	case "mysql":
+		// MySQL DSN 形如 [user[:pass]@][tcp(host:port)]/dbname?...；文件路径一定不是。
+		if isFileDSN(dsn) || !strings.Contains(dsn, "/") {
+			return fmt.Errorf("GOJOB_DB_DRIVER=mysql 但 GOJOB_DB_DSN=%q 是 sqlite 文件路径或不是 MySQL DSN；"+
+				"请同时设置 MySQL DSN，例如 user:pass@tcp(host:3306)/db?charset=utf8mb4&parseTime=True&loc=UTC", dsn)
+		}
+	case "postgres", "pgsql", "postgresql":
+		// PG 接 URL（postgres://...）或关键字写法（host=... dbname=...）；文件路径两者都不是。
+		if isFileDSN(dsn) && !strings.Contains(dsn, "=") && !strings.Contains(dsn, "://") {
+			return fmt.Errorf("GOJOB_DB_DRIVER=%s 但 GOJOB_DB_DSN=%q 是 sqlite 文件路径或不是 PostgreSQL DSN；"+
+				"请同时设置 PG DSN，例如 postgres://user:pass@host:5432/db?sslmode=disable", driver, dsn)
+		}
+	}
+	return nil
+}
+
+func isFileDSN(dsn string) bool {
+	if strings.HasPrefix(dsn, "/") || strings.HasPrefix(dsn, "./") || strings.HasPrefix(dsn, "../") || strings.HasPrefix(dsn, "~") {
+		return true
+	}
+	return strings.HasSuffix(dsn, ".db") || strings.HasSuffix(dsn, ".sqlite") || strings.HasSuffix(dsn, ".sqlite3")
+}
+
 // Open driver: sqlite | mysql | postgres
 func Open(driver, dsn string) (*Store, error) {
+	if err := validateDSN(driver, dsn); err != nil {
+		return nil, err
+	}
 	var dialector gorm.Dialector
 	switch driver {
 	case "sqlite", "":
@@ -76,10 +107,24 @@ func (s *Store) SetPool(p Pool) error {
 	return nil
 }
 
-func (s *Store) Migrate() error {
-	if err := s.DB.AutoMigrate(&AppInfo{}, &UserInfo{}, &JobInfo{}, &JobInstance{},
-		&InstanceTask{}, &InstanceTaskLog{}, &LoginLog{}, &OperationLog{}, &ServerNode{},
-		&AppLease{}, &WorkerNode{}, &ClusterSignal{}, &TokenRevoked{}); err != nil {
+// schemaModels 启动期要建、也要核对的全部表。
+var schemaModels = []any{&AppInfo{}, &UserInfo{}, &JobInfo{}, &JobInstance{},
+	&InstanceTask{}, &InstanceTaskLog{}, &LoginLog{}, &OperationLog{}, &ServerNode{},
+	&AppLease{}, &WorkerNode{}, &ClusterSignal{}, &TokenRevoked{}}
+
+// Migrate 建表 + 回填，需要数据库账号具备 DDL 权限（sqlite、本地开发、一键体验）。
+func (s *Store) Migrate() error { return s.migrate(true) }
+
+// PrepareSchema 不执行任何 DDL。线上账号通常只有增删改查权限，建表由 DBA 用
+// scripts/ddl/*.sql 完成，进程启动只核对表与列齐不齐，缺了就在启动期报错。
+func (s *Store) PrepareSchema() error { return s.migrate(false) }
+
+func (s *Store) migrate(autoMigrate bool) error {
+	if autoMigrate {
+		if err := s.DB.AutoMigrate(schemaModels...); err != nil {
+			return err
+		}
+	} else if err := s.checkSchema(); err != nil {
 		return err
 	}
 	// 为升级前的存量用户回填默认值（AutoMigrate 加列不会给旧行填默认）。
@@ -101,6 +146,47 @@ func (s *Store) Migrate() error {
 	now := Now()
 	return s.DB.Where("id = ?", SignalRowID).
 		FirstOrCreate(&ClusterSignal{ID: SignalRowID, CreateTime: now, ModifyTime: now}).Error
+}
+
+// checkSchema 不开自动建表时核对表与列，缺什么都点名。等到运行期某条 SQL 报
+// "Unknown column" 才发现，现场已经离配置点很远了。
+func (s *Store) checkSchema() error {
+	var missing []string
+	m := s.DB.Migrator()
+	for _, mdl := range schemaModels {
+		stmt := &gorm.Statement{DB: s.DB}
+		if err := stmt.Parse(mdl); err != nil {
+			return err
+		}
+		table := stmt.Schema.Table
+		if !m.HasTable(mdl) {
+			missing = append(missing, "表 "+table)
+			continue
+		}
+		cols, err := m.ColumnTypes(mdl)
+		if err != nil {
+			return err
+		}
+		have := make(map[string]bool, len(cols))
+		for _, c := range cols {
+			have[strings.ToLower(c.Name())] = true
+		}
+		for _, f := range stmt.Schema.Fields {
+			if f.DBName != "" && !have[strings.ToLower(f.DBName)] {
+				missing = append(missing, table+"."+f.DBName)
+			}
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	list := strings.Join(missing, ", ")
+	if len(missing) > 8 {
+		list = strings.Join(missing[:8], ", ") + fmt.Sprintf("……（共 %d 项）", len(missing))
+	}
+	return fmt.Errorf("库里缺少 %s；本进程按 auto-migrate=false 启动，不会执行任何 DDL。"+
+		"请由 DBA 执行 scripts/ddl/ 下对应驱动的建表脚本（存量库再补 server/README.md「存量库升级」里的 ALTER），"+
+		"或临时改回 GOJOB_DB_AUTO_MIGRATE=true", list)
 }
 
 // ---------- Go 1.27 泛型方法：通用仓储操作 ----------

@@ -121,8 +121,10 @@ for platform in $PLATFORMS; do
       -ldflags="-s -w -X main.version=$TAG" -o "$STAGE/$pkg/$bin$suffix" ./cmd/$bin
     built=$((built + 1))
   done
-  # README 打进包里，解压即有一份能读的说明
+  # README 与建表脚本打进包里，解压即有一份能读的说明、一份能直接执行的 DDL
   cp README.md CHANGELOG.md "$STAGE/$pkg/"
+  mkdir -p "$STAGE/$pkg/ddl"
+  cp scripts/ddl/mysql.sql scripts/ddl/postgres.sql "$STAGE/$pkg/ddl/"
   # 绝对路径：上一行刚 cd 进 $STAGE，相对路径的 ../dist 会解析成 dist/dist/
   (cd "$STAGE" && tar czf "$ROOT/$DIST/gojob-$TAG-$pkg.tar.gz" "$pkg")
   printf '   %-16s %s\n' "$pkg" "$(du -h "$DIST/gojob-$TAG-$pkg.tar.gz" | cut -f1)"

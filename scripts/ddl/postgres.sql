@@ -1,8 +1,11 @@
 -- gojob 数据库初始化脚本 (PostgreSQL 14+)
 -- 用法: psql -U postgres -f scripts/ddl/postgres.sql
 -- 说明:
---   * 表结构与 GORM AutoMigrate 完全一致；server 启动时也会自动建表，
---     本脚本用于"模拟安装"或由 DBA 预先建库的场景。
+--   * 表与列和 GORM 模型一一对应，但本脚本比 AutoMigrate 生成的更严：多数列写了 NOT NULL
+--     与 DEFAULT，而 struct 刻意不带这些标签（0/false 是合法配置，见 server/README.md）。
+--     AutoMigrate 按 struct 口径比对，会试图把这些列放宽，且需要数据库账号有 ALTER 权限。
+--   * 线上账号只有增删改查权限时，用本脚本建表并设 GOJOB_DB_AUTO_MIGRATE=false，
+--     进程启动不再执行任何 DDL，只核对表与列齐不齐。
 --   * DSN 示例: postgres://gojob:gojob123@127.0.0.1:5432/gojob?sslmode=disable
 --   * 管理员账号无需 SQL 初始化：首次启动由 server 按 GOJOB_ADMIN_USER /
 --     GOJOB_ADMIN_PASSWORD（或 -admin-user/-admin-password）自动播种（bcrypt）。
