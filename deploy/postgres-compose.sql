@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS worker_nodes (
   open_fds       INTEGER NOT NULL DEFAULT 0,
   running_tasks  INTEGER NOT NULL DEFAULT 0,
   accept_tasks   BOOLEAN NOT NULL DEFAULT TRUE,  -- FALSE=已停止接单；选节点只看 TRUE
+  worker_receiving BOOLEAN NULL DEFAULT NULL,    -- FALSE=worker 自己已停拉新任务（SDK stop）。NULL=这一跳没报（老 SDK/存量行），判可接单时按 TRUE 兜底
   last_heartbeat TIMESTAMPTZ(3) NULL,
   create_time    TIMESTAMPTZ(3) NULL,
   modify_time    TIMESTAMPTZ(3) NULL,
