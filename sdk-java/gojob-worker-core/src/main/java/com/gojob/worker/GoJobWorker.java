@@ -509,6 +509,9 @@ public final class GoJobWorker implements AutoCloseable {
         req.memoryUsed = readMemoryUsedMb();
         req.memoryMax = readMemoryMaxMb();
         req.tag = config.getTag();
+        // 本机是否在拉新任务随心跳上报：运维在控制台/ERP 点「停止节点」之后，
+        // server 要能看见这台"在线但不接活"，否则到点的触发会攒成永远没人领的待拉取实例。
+        req.receiving = receiving.get();
         // 运行时指标随心跳上报，控制台「节点监控」页据此显示进程 CPU/GC/线程/fd
         runtimeMetrics.fill(req, config.getMaxConcurrency() - slots.availablePermits());
         try {

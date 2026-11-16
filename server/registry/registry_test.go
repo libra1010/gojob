@@ -41,6 +41,69 @@ func instanceIDs(ws []protocol.WorkerInfo) []string {
 	return out
 }
 
+// 自报旗（worker_receiving）的三件事都要钉住：报 false 就离开候选集、心跳不能抹掉它、
+// 老 SDK 报 nil 必须一个字节都不改。这三条就是「停止节点 ⇒ 不再产生待拉取实例」的底座。
+func TestSelfReportedReceivingTogglesEligibility(t *testing.T) {
+	r, _ := newReg(t)
+	if err := r.Alive(beat("app1", "w-1", "10.0.0.1:7799")); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(r.Workers("app1")); got != 1 {
+		t.Fatalf("首跳候选集 = %d, want 1（没报过就按在接单算）", got)
+	}
+
+	off := false
+	if err := r.ReportReceiving("app1", "w-1", &off); err != nil {
+		t.Fatal(err)
+	}
+	if got := instanceIDs(r.Workers("app1")); len(got) != 0 {
+		t.Fatalf("自报停拉后还在候选集：%v", got)
+	}
+	alive, eligible, err := r.Eligibility("app1")
+	if err != nil || !alive || eligible {
+		t.Fatalf("Eligibility = (%v, %v, %v), want 在线 true、可接单 false", alive, eligible, err)
+	}
+	if ok, err := r.Accepting("app1", "w-1"); err != nil || ok {
+		t.Fatalf("Accepting = (%v, %v), want false（认领热路径也要拦住）", ok, err)
+	}
+
+	// 心跳是每 5s 一次的 upsert，绝不能把刚报上来的停拉抹掉
+	for i := 0; i < 3; i++ {
+		if err := r.Alive(beat("app1", "w-1", "10.0.0.1:7799")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := len(r.Workers("app1")); got != 0 {
+		t.Fatalf("心跳把自报的停拉刷回去了：候选集 %d 台", got)
+	}
+
+	// 恢复接单走的就是这条路：报 true 立刻回到候选集
+	on := true
+	if err := r.ReportReceiving("app1", "w-1", &on); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(r.Workers("app1")); got != 1 {
+		t.Fatalf("恢复后候选集 = %d, want 1", got)
+	}
+
+	// 老 SDK 不报这个字段（nil）：保持原值，既不顺手当成"在接单"也不当成"已停"
+	if err := r.ReportReceiving("app1", "w-1", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(r.Workers("app1")); got != 1 {
+		t.Fatalf("nil 把状态改了：候选集 = %d, want 1", got)
+	}
+	if err := r.ReportReceiving("app1", "w-1", &off); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ReportReceiving("app1", "w-1", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(r.Workers("app1")); got != 0 {
+		t.Fatalf("nil 把已停的刷回来了：候选集 = %d, want 0", got)
+	}
+}
+
 func TestDrainedNodeLeavesDispatchSetAndSurvivesHeartbeats(t *testing.T) {
 	r, _ := newReg(t)
 	for i, id := range []string{"w-1", "w-2", "w-3"} {

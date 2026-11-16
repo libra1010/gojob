@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS worker_nodes (
   open_fds       INT          NOT NULL DEFAULT 0,
   running_tasks  INT          NOT NULL DEFAULT 0,
   accept_tasks   TINYINT(1)   NOT NULL DEFAULT 1,  -- 0=控制台已停止接单；选节点只看 1（worker 侧不感知）
+  worker_receiving TINYINT(1) NULL DEFAULT NULL,   -- 0=worker 自己已停拉新任务（SDK stop）。NULL=这一跳没报（老 SDK/存量行），判可接单时按 1 兜底
   last_heartbeat DATETIME(3)  NULL,
   create_time    DATETIME(3)  NULL,
   modify_time    DATETIME(3)  NULL,

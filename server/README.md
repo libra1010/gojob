@@ -75,6 +75,10 @@ ALTER TABLE app_infos      MODIFY COLUMN password VARCHAR(128) NOT NULL DEFAULT 
 ALTER TABLE job_infos      MODIFY COLUMN time_expression VARCHAR(512) NOT NULL DEFAULT '';
 -- 实例来源新增 FIXED_RATE/FIXED_DELAY/DAILY_TIME_INTERVAL，旧版 VARCHAR(16) 装不下
 ALTER TABLE job_instances  MODIFY COLUMN source          VARCHAR(32)  NOT NULL DEFAULT '';
+-- 节点下线语义：worker 自报的"还在拉新任务"旗，与 accept_tasks（只由控制台写）分权。
+-- 必须可空：NULL = 这一跳没报（老 SDK），判可接单时按"在接单"兜底，否则升级瞬间全池消失。
+ALTER TABLE worker_nodes   ADD COLUMN worker_receiving TINYINT(1) NULL DEFAULT NULL;
+--   PostgreSQL 对应：ALTER TABLE worker_nodes ADD COLUMN worker_receiving BOOLEAN NULL DEFAULT NULL;
 -- PostgreSQL 对应写法：
 --   ALTER TABLE job_infos     ALTER COLUMN time_expression TYPE VARCHAR(512);
 --   ALTER TABLE job_instances ALTER COLUMN source          TYPE VARCHAR(32);

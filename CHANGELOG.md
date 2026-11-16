@@ -6,6 +6,7 @@
 
 ### 新增
 
+- **品牌图标与 favicon**：新增 `dashboard/public/favicon.svg`（几何 G：环 + 下颌 + 内挑横杠一笔成形，32 格下线宽 3.4）、`favicon-32.png` 与铺底的 `apple-touch-icon.png`；`index.html` 挂上 `icon` / `alternate icon` / `apple-touch-icon` / `theme-color`，侧栏与登录页原先拿文字 "G" 顶替的品牌位改为引用同一个标记。此前项目**没有任何图标资产**（连 `public/` 都没有），浏览器标签页是浏览器默认页。定稿前对比过时钟轮与分发扇出两种构形，它们在 24px 下都糊成一团，故弃用
 - **`GOJOB_DB_AUTO_MIGRATE`（默认 `true`）**：设 `false` 时进程启动**不执行任何 DDL**，改为核对表与列是否齐备，缺了就在启动期点名缺哪张表/哪一列并指向 `scripts/ddl/*.sql` 与「存量库升级」清单。此前服务端每次启动都无条件跑 gorm `AutoMigrate`，而线上数据库账号按最小权限通常只有增删改查（没有 `ALTER`/`CREATE`），结果是**照 `scripts/ddl` 建好库、口令与驱动都配对，仍然起不来**：`migrate: Error 1142 ALTER command denied to user 'gojob'@... for table 'app_infos'`。实测（一次性 MySQL 8.0 容器，账号只授 `SELECT,INSERT,UPDATE,DELETE`）：默认路径复现该 1142，设 `false` 后启动通过 `/healthz`，登录→建项目→建任务全部落库，`max_retry_times=0`、`instance_num_limit=0` 这类显式零值没被 DDL 的 `DEFAULT 3` 顶掉。顺带纠正 `scripts/ddl/*.sql` 头部"与 GORM AutoMigrate 完全一致"的说法：DDL 比 struct 更严（实测 119 列 `NOT NULL`、84 列 `DEFAULT` 是 struct 没有的口径），带着 DDL 权限启动时 AutoMigrate 会试图把这些列放宽，所以线上应当用 `false` 而不是给业务账号加 `ALTER`
 
 ### 修复

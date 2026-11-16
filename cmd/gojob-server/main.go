@@ -161,6 +161,12 @@ func main() {
 			log.Fatalf("migrate: %v", err)
 		}
 	} else {
+		// sqlite 没有建表脚本，结构只能由 AutoMigrate 建；关掉它等于没有结构来源，
+		// 必须在启动期点破，别留到运行期报 no such table。
+		if *driver == "" || *driver == "sqlite" {
+			log.Fatalf("GOJOB_DB_AUTO_MIGRATE=false 不适用于 sqlite：sqlite 没有建表脚本，表结构只能由 AutoMigrate 建立。" +
+				"要么去掉该配置，要么换 -driver mysql|postgres 并由 DBA 执行 scripts/ddl/*.sql")
+		}
 		// 线上账号只有增删改查权限时走这条：不碰结构，只核对 DBA 建好的库。
 		log.Printf("db schema: auto-migrate=false，本进程不执行任何 DDL，表结构以 scripts/ddl 为准")
 		if err := st.PrepareSchema(); err != nil {
@@ -189,7 +195,10 @@ func main() {
 
 	reg := registry.New(st.DB, 15*time.Second)
 	disp := dispatch.New(st, reg, sig)
-	sched := scheduler.New(st, leases, disp.Notify, disp.PickTarget, disp.BroadcastTargets, reg.HasWorkers)
+	// 调度探测用 Eligibility（在线 + 可接单两把旗都举着），不是只数心跳的 HasWorkers：
+	// "这台不接新活"就该让到点的触发当场失败，而不是攒一堆没人领的待拉取实例。
+	// 认领热路径仍走 HasWorkers（见 dispatch.claim）——已停单的节点还得能长轮询收到停止指令。
+	sched := scheduler.New(st, leases, disp.Notify, disp.PickTarget, disp.BroadcastTargets, reg.Eligibility)
 	// 失去归属 → 立刻撤掉该项目的时间轮，不再去撞 fencing。
 	leases.OnLost(sched.DropApp)
 	// 依赖触发：实例终态（事务已提交）回调调度器，成功则拉起下游实例。
@@ -287,8 +296,10 @@ func maintain(ctx context.Context, reg *registry.Registry, disp *dispatch.Dispat
 			if err := disp.ReleaseStaleTargets(time.Minute); err != nil {
 				log.Printf("maintain: %v", err)
 			}
-			// 排队超过 1 分钟、项目仍无在线节点的任务判失败：兜住"触发后节点立刻掉线"这类漏网。
-			if err := disp.FailOrphanedWaiting(time.Minute); err != nil {
+			// 排队超过 20 秒、项目仍无可接单节点的任务判失败：兜住"触发后节点立刻掉线/立刻停单"这类漏网。
+			// 20s 是滚动发布用的：旧 pod 停单到新 pod 心跳落库总有几秒空窗，太短会误杀刚入队的任务，
+			// 再长就又退化成"排着等运维"了。这一档同时管"节点全掉线"（原来固定 1 分钟），两把场景共用一把尺。
+			if err := disp.FailOrphanedWaiting(20 * time.Second); err != nil {
 				log.Printf("maintain: %v", err)
 			}
 		}

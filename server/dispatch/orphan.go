@@ -17,10 +17,11 @@ const waitingSweepBatch = 500
 
 // FailOrphanedWaiting 收尾两类排队任务：
 //  1. 停止意图已经落下、任务却还在 WAITING 的（停止与失联回收的竞态遗留）——按 STOPPED 收尾；
-//  2. 排队超过 grace、且所在项目一个在线节点都没有的——按 FAILED 收尾。
+//  2. 排队超过 grace、且所在项目一个**可接单**节点都没有的——按 FAILED 收尾。
 //
-// 这是"无节点触发当场失败"的兜底，覆盖触发后节点立刻掉线、以及停止竞态里残留的未派发任务。
-// 全停接单的项目仍然排队：HasWorkers 刻意不看 accept_tasks，对应"停接单=暂停派发"的既有语义。
+// 这是"无人可派当场失败"的兜底，覆盖触发后节点立刻掉线、以及停止竞态里残留的未派发任务。
+// 尺从"在线节点"换成"可接单节点"（Eligibility）：全部停单的项目不再攒着一堆永远没人领的
+// 待拉取任务——那种状态既不等于"等会儿会跑"，也不等于失败，只是把运维视野糊住。
 func (d *Dispatcher) FailOrphanedWaiting(grace time.Duration) error {
 	stopped, err := d.stopRequestedWaiting()
 	if err != nil {
@@ -67,7 +68,7 @@ func (d *Dispatcher) stopRequestedWaiting() (int, error) {
 	}
 }
 
-// failWaitingWithoutWorkers 只对"项目已无在线节点"的项目动手；有节点的项目保持排队，
+// failWaitingWithoutWorkers 只对"项目已无可接单节点"的项目动手；还有节点肯接单的项目保持排队，
 // 让 worker 按空闲额度认领（等价于兼容协议的"过载不派发、等巡检重试"）。
 func (d *Dispatcher) failWaitingWithoutWorkers(grace time.Duration) (int, error) {
 	cutoff := store.Now().Add(-grace)
@@ -77,17 +78,22 @@ func (d *Dispatcher) failWaitingWithoutWorkers(grace time.Duration) (int, error)
 		Distinct().Pluck("app_id", &apps).Error; err != nil {
 		return 0, err
 	}
-	result := fmt.Sprintf("无可用 worker：排队超过 %d 秒仍无在线节点", int(grace.Seconds()))
 	failed := 0
 	for _, appId := range apps {
-		ok, err := d.reg.HasWorkers(appId)
+		alive, eligible, err := d.reg.Eligibility(appId)
 		if err != nil {
 			log.Printf("probe workers of app %s: %v", appId, err)
 			continue
 		}
-		if ok {
+		if eligible {
 			continue
 		}
+		// 原因分两档，与触发路径同口径：掉线要去拉进程，停单只要点恢复接单。
+		phrase := "仍无在线节点"
+		if alive {
+			phrase = "仍无可接单节点（节点在线但已全部停止接单）"
+		}
+		result := fmt.Sprintf("无可用 worker：排队超过 %d 秒%s", int(grace.Seconds()), phrase)
 		n, err := d.failWaitingOfApp(appId, cutoff, result)
 		failed += n
 		if err != nil {

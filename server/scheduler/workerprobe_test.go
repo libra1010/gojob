@@ -11,7 +11,10 @@ import (
 	"gojob/server/store"
 )
 
-func newProbeFixture(t *testing.T, probe func(string) (bool, error)) (*store.Store, *Scheduler, *int) {
+// probeWorkerState 探针桩：alive=有没有在线节点，eligible=其中有没有可接单的。
+type probeWorkerState struct{ alive, eligible bool }
+
+func newProbeFixture(t *testing.T, probe func(string) (bool, bool, error)) (*store.Store, *Scheduler, *int) {
 	t.Helper()
 	st, err := store.Open("sqlite", filepath.Join(t.TempDir(), "probe.db"))
 	if err != nil {
@@ -39,7 +42,7 @@ func seedProbeJob(t *testing.T, st *store.Store, executeType string) *store.JobI
 
 // 没有在线节点：实例与根任务当场 FAILED，计划时间照常推进，且不唤醒长轮询。
 func TestFireFailsFastWhenNoWorkerOnline(t *testing.T) {
-	st, s, notified := newProbeFixture(t, func(string) (bool, error) { return false, nil })
+	st, s, notified := newProbeFixture(t, func(string) (bool, bool, error) { return false, false, nil })
 	job := seedProbeJob(t, st, "")
 	next := job.NextTriggerTime.Add(time.Minute)
 
@@ -76,8 +79,40 @@ func TestFireFailsFastWhenNoWorkerOnline(t *testing.T) {
 	}
 }
 
+// 节点都在线但全部停止接单：同样当场 FAILED，原因必须写"停止接单"而不是"没有在线节点"。
+// 两档文案对应两个不同的运维动作（点恢复 vs 拉进程），写串一档就等于把运维支去重启一个不用重启的东西。
+func TestFireFailsFastWhenAllWorkersStoppedAccepting(t *testing.T) {
+	st, s, notified := newProbeFixture(t, func(string) (bool, bool, error) { return true, false, nil })
+	job := seedProbeJob(t, st, "")
+
+	_, instID, err := s.fire(job, job.NextTriggerTime, "API", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inst store.JobInstance
+	if err := st.DB.First(&inst, instID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if inst.Status != protocol.InstanceFailed || !strings.Contains(inst.Result, "停止接单") {
+		t.Fatalf("实例 = %s / %q, want FAILED + 停止接单", inst.Status, inst.Result)
+	}
+	if strings.Contains(inst.Result, "没有在线节点") {
+		t.Fatalf("两档文案串了：%q", inst.Result)
+	}
+	var task store.InstanceTask
+	if err := st.DB.Where("instance_id = ?", instID).First(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != protocol.TaskFailed || !strings.Contains(task.Result, "停止接单") {
+		t.Fatalf("根任务 = %s / %q, want FAILED + 停止接单", task.Status, task.Result)
+	}
+	if *notified != 0 {
+		t.Fatalf("notify = %d, want 0（没人可派，不该唤醒长轮询）", *notified)
+	}
+}
+
 func TestFireQueuesWhenWorkerOnline(t *testing.T) {
-	st, s, notified := newProbeFixture(t, func(string) (bool, error) { return true, nil })
+	st, s, notified := newProbeFixture(t, func(string) (bool, bool, error) { return true, true, nil })
 	job := seedProbeJob(t, st, "")
 
 	_, instID, err := s.fire(job, job.NextTriggerTime, "API", "", 0)
@@ -105,7 +140,7 @@ func TestFireQueuesWhenWorkerOnline(t *testing.T) {
 
 // 在线探测查询失败时按"有节点"处理：宁可排队，也不能因为一次抖动把整批实例判死。
 func TestFireQueuesWhenWorkerProbeFails(t *testing.T) {
-	st, s, _ := newProbeFixture(t, func(string) (bool, error) { return false, errors.New("db down") })
+	st, s, _ := newProbeFixture(t, func(string) (bool, bool, error) { return false, false, errors.New("db down") })
 	job := seedProbeJob(t, st, "")
 
 	_, instID, err := s.fire(job, job.NextTriggerTime, "API", "", 0)
@@ -123,7 +158,7 @@ func TestFireQueuesWhenWorkerProbeFails(t *testing.T) {
 
 // 广播零节点保持既有语义：根任务就是终态，不产生待领取任务，不该被改判失败。
 func TestFireBroadcastZeroNodesStillSucceeds(t *testing.T) {
-	st, s, _ := newProbeFixture(t, func(string) (bool, error) { return false, nil })
+	st, s, _ := newProbeFixture(t, func(string) (bool, bool, error) { return false, false, nil })
 	job := seedProbeJob(t, st, protocol.ExecuteBroadcast)
 
 	_, instID, err := s.fire(job, job.NextTriggerTime, "API", "", 0)

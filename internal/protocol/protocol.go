@@ -133,6 +133,9 @@ type WorkerInfo struct {
 type HeartbeatReq struct {
 	WorkerInfo
 	Token string `json:"token"` // /worker/register 签发的短周期凭证，不再携带项目口令
+	// Receiving = worker 本机此刻是否还在拉新任务（SDK stopReceivingNewTasks() 把它翻成 false）。
+	// 指针语义：nil 表示这个 SDK 版本没有这个概念，服务端必须保持库里原值，不能当成"已停"。
+	Receiving *bool `json:"receiving,omitempty"`
 }
 
 // RegisterReq：worker 用项目口令换取数据面 token 的唯一入口。

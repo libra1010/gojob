@@ -39,7 +39,7 @@ async function onSubmit() {
     <div class="shell">
       <aside class="aside">
         <div class="aside-top">
-          <span class="logo">G</span>
+          <img class="logo" src="/favicon.svg" alt="gojob" />
           <span class="wordmark">gojob</span>
         </div>
 
@@ -161,18 +161,12 @@ async function onSubmit() {
   align-items: center;
   gap: 12px;
 }
+/* 标记图自带底色与圆角，这里只定尺寸 */
 .logo {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
   width: 38px;
   height: 38px;
   border-radius: 10px;
-  background: var(--gj-primary);
-  color: #fff;
-  font-size: 21px;
-  font-weight: 700;
-  line-height: 1;
 }
 .wordmark {
   font-size: 18px;

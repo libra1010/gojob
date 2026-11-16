@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="gojob">
+  <!-- 品牌标记：几何 G 一笔成形（环 + 下颌 + 内挑横杠）。
+       16px 起才认得出字母，所以线宽按 32 格给到 3.4，缺口只开在右侧、不做悬空方块。 -->
+  <defs>
+    <linearGradient id="gj-badge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2470E6"/>
+      <stop offset="1" stop-color="#1148A8"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="7.5" fill="url(#gj-badge)"/>
+  <path d="M23.8 12.4A8.6 8.6 0 1 0 23.8 19.6L23.8 16H17.6" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

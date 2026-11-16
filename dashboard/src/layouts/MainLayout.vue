@@ -100,7 +100,7 @@ async function onLogout() {
   <el-container class="layout">
     <el-header class="header" height="60px">
       <div class="brand" @click="router.push('/')">
-        <span class="logo">G</span>
+        <img class="logo" src="/favicon.svg" alt="gojob" />
         <span class="brand-text">
           <span class="title">gojob</span>
           <span class="subtitle">任务调度控制台</span>
@@ -194,18 +194,13 @@ async function onLogout() {
   cursor: pointer;
   flex-shrink: 0;
 }
+/* 标记图自带底色与圆角，这里只定尺寸；描边从内侧改到外侧，压在深蓝导航上才有边界感 */
 .logo {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: var(--gj-primary);
-  color: #fff;
-  font-size: 16px;
-  font-weight: 750;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14);
 }
 .title {
   font-size: 17px;

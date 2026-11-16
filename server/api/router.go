@@ -533,6 +533,12 @@ func (s *Server) heartbeat(c *gin.Context) {
 		writeErr(c, protocol.CodeErr, "heartbeat not recorded: "+err.Error())
 		return
 	}
+	// 顺带记下 worker 自己那面旗（本机 stop/resume 的结果）。老 SDK 报 nil，
+	// ReportReceiving 会直接跳过——猜成 true 会抹掉运维开关，猜成 false 会误停整池。
+	if err := s.reg.ReportReceiving(req.AppId, req.InstanceId, req.Receiving); err != nil {
+		writeErr(c, protocol.CodeErr, "heartbeat not recorded: "+err.Error())
+		return
+	}
 	// 心跳是停止指令的兜底通道（长轮询已断或 worker 满载时仍能收到），
 	// 同时是集群路由提示的下发通道：worker 每 5s 一次心跳，搭车下发就等于零额外 QPS，
 	// 不需要兼容协议那种每 10s 一次的 /server/acquire 专用端点。

@@ -27,8 +27,12 @@ var ErrJobRunning = errors.New("job is running and skip_when_running is enabled"
 // 即使建出任务也永远拉不到，直接拒绝比留一个卡在 WAITING 的实例清楚。
 var ErrJobPaused = errors.New("任务已暂停，不能手动触发；请先恢复任务")
 
-// noWorkerResult 触发时项目没有在线节点的实例结果，对齐兼容协议的 NO_WORKER_AVAILABLE。
-const noWorkerResult = "无可用 worker：该项目当前没有在线节点"
+// 触发时"没人可派"的实例结果，对齐兼容协议的 NO_WORKER_AVAILABLE。
+// 分两档是因为运维动作完全不同：节点掉线要去拉进程，节点停单只要点一下恢复接单。
+const (
+	noWorkerOfflineResult = "无可用 worker：该项目当前没有在线节点"
+	noWorkerPausedResult  = "无可用 worker：节点在线但已全部停止接单"
+)
 
 // SecondOptional：同时支持标准 5 段 cron 与兼容协议的 6 段秒级表达式风格
 var cronParser = cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour |
@@ -163,10 +167,10 @@ type Scheduler struct {
 	// fanout 广播的落点集合：返回该项目下每个在线节点的 worker instance_id。
 	// 与 pick 的区别是它不做策略选择——"每台一份"本身就是分发结果，再选一次反而漏掉节点。
 	fanout func(*store.JobInfo) []string
-	// probeWorkers 项目当前是否有在线节点；nil = 不探测（测试/单机简化）。
-	// 触发时无在线节点就当场把实例判失败，对齐兼容协议的 no worker available，
-	// 不留在队列里等节点上线后补跑。
-	probeWorkers func(appId string) (bool, error)
+	// probeWorkers 分开报"有没有在线节点"与"有没有可接单节点"；nil = 不探测（测试/单机简化）。
+	// 两者都不成立就当场把实例判失败（对齐兼容协议的 no worker available），不留在队列里等补跑。
+	// 要两个数而不是一个布尔：节点在线但全部停单，和节点全掉线，运维动作完全不同。
+	probeWorkers func(appId string) (alive, eligible bool, err error)
 
 	wheel *Wheel
 	mu    sync.Mutex
@@ -178,7 +182,7 @@ type Scheduler struct {
 
 // New leases 传 nil 表示单副本部署（此时所有项目都归本机调度，行为与引入集群前完全一致）。
 func New(st *store.Store, leases *cluster.Leases, notify func(), pick func(*store.JobInfo) string,
-	fanout func(*store.JobInfo) []string, probeWorkers func(appId string) (bool, error)) *Scheduler {
+	fanout func(*store.JobInfo) []string, probeWorkers func(appId string) (alive, eligible bool, err error)) *Scheduler {
 	return &Scheduler{
 		st:           st,
 		leases:       leases,
@@ -406,14 +410,19 @@ func (s *Scheduler) fire(job *store.JobInfo, next time.Time, source, instancePar
 	// 广播除外：零节点广播按既有语义记 SUCCEED（根任务就是终态、不产生待领取任务），
 	// 本来就不会积压，不该被改判失败。
 	noWorker := false
+	noWorkerReason := ""
 	if s.probeWorkers != nil && job.ExecuteType != protocol.ExecuteBroadcast {
-		ok, err := s.probeWorkers(job.AppId)
+		alive, eligible, err := s.probeWorkers(job.AppId)
 		switch {
 		case err != nil:
 			// 探测失败按"有节点"处理：宁可排队，也不因一次查询抖动把整批实例判死。
 			log.Printf("probe workers for app %s: %v", job.AppId, err)
-		case !ok:
-			noWorker = true
+		case eligible:
+			// 有可接单节点，照常入队
+		case alive:
+			noWorker, noWorkerReason = true, noWorkerPausedResult
+		default:
+			noWorker, noWorkerReason = true, noWorkerOfflineResult
 		}
 	}
 	_, err = s.st.Tx(func(tx *gorm.DB) (struct{}, error) {
@@ -468,7 +477,7 @@ func (s *Scheduler) fire(job *store.JobInfo, next time.Time, source, instancePar
 		}
 		instStatus, instResult, runningTimes := protocol.InstanceWaiting, "", 1
 		if noWorker {
-			instStatus, instResult, runningTimes = protocol.InstanceFailed, noWorkerResult, 0
+			instStatus, instResult, runningTimes = protocol.InstanceFailed, noWorkerReason, 0
 		}
 		inst := store.JobInstance{
 			JobId: job.ID, AppId: job.AppId, JobName: job.JobName,
@@ -491,7 +500,7 @@ func (s *Scheduler) fire(job *store.JobInfo, next time.Time, source, instancePar
 		instanceId = inst.ID
 		taskStatus, taskResult := protocol.TaskWaiting, ""
 		if noWorker {
-			taskStatus, taskResult = protocol.TaskFailed, noWorkerResult
+			taskStatus, taskResult = protocol.TaskFailed, noWorkerReason
 		}
 		task := store.InstanceTask{
 			JobId: job.ID, InstanceId: inst.ID, AppId: job.AppId,

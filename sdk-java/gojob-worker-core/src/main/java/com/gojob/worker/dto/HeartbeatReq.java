@@ -39,6 +39,14 @@ public class HeartbeatReq implements Tokenized {
     @JsonProperty("sdk_type")
     public String sdkType;
 
+    /**
+     * 本进程此刻是否还在拉新任务（stopReceivingNewTasks / resumeReceivingNewTasks 翻的就是它）。
+     * 用包装类型而不是 boolean：null = 这一跳没报，server 端保持库里原值，不替运维猜。
+     * 老 server 收到这个字段直接忽略，向后兼容。
+     */
+    @JsonProperty("receiving")
+    public Boolean receiving;
+
     /** /worker/register 签发的短周期凭证；数据面不再携带项目口令。 */
     @JsonProperty("token")
     public String token;

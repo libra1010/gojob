@@ -29,8 +29,9 @@ func New(db *gorm.DB, ttl time.Duration) *Registry {
 // Alive 记下一次心跳（upsert 本节点那一行）。
 // 返回错误让心跳 handler 能把"没记上"如实回给 worker，而不是假装注册成功。
 //
-// accept_tasks / accept_seq 不在覆盖列里：那是管理面的状态，worker 每 5s 一跳不能把
-// 运维刚设的开关刷掉。
+// accept_tasks 不在覆盖列里：那是管理面的状态，worker 每 5s 一跳不能把运维刚设的开关刷掉。
+// worker_receiving 走另一条路（ReportReceiving），而且只在 worker 真报了的时候写：
+// 于是"运维停单"与"进程自己下线"两把旗谁也算计不到对方。
 func (r *Registry) Alive(w protocol.WorkerInfo) error {
 	now := store.Now()
 	row := toRow(w, now)
@@ -44,6 +45,25 @@ func (r *Registry) Alive(w protocol.WorkerInfo) error {
 	return err
 }
 
+// ReportReceiving 记一下 worker 自己报的"我还在不在拉新任务"（SDK 的 stop/resume 就翻这个）。
+//
+// receiving==nil 表示这个 SDK 版本没这个字段，库里一个字节都不碰：
+// 当成 true 会在老 worker 每一跳把运维刚按下去的停单抹回接单中，
+// 当成 false 会在升级那一刻把所有在线节点踢出候选集——两头都不能猜。
+// 这里只写 worker_receiving，绝不碰 accept_tasks（那是管理面的旗）。
+func (r *Registry) ReportReceiving(appId, instanceId string, receiving *bool) error {
+	if receiving == nil {
+		return nil
+	}
+	if err := r.db.Model(&store.WorkerNode{}).
+		Where("app_id = ? AND instance_id = ?", appId, instanceId).
+		Update("worker_receiving", *receiving).Error; err != nil {
+		log.Printf("registry: record receiving of %s/%s: %v", appId, instanceId, err)
+		return err
+	}
+	return nil
+}
+
 // heartbeatColumns 心跳要覆盖的列。app_id/instance_id 是定位键，create_time 不属于这里
 // （upsert 更新时不能把首次上线时间刷掉）。
 var heartbeatColumns = []string{"address", "cpu_load", "cpu_processors", "memory_used",
@@ -54,6 +74,14 @@ var heartbeatColumns = []string{"address", "cpu_load", "cpu_processors", "memory
 // `OR accept_tasks IS NULL` 是给存量行的兜底：这一列为空只可能是"这个库还没写过开关"，
 // 历史含义就是接单中；若按 NULL 当"已停止"处理，升级那一刻所有在线节点会一起从候选集里消失。
 const acceptingSQL = "(accept_tasks = ? OR accept_tasks IS NULL)"
+
+// receivingSQL worker 自己报的那面旗。NULL 兜底与 accept_tasks 同口径：
+// 存量行和压根不带这个字段的老 SDK 都必须算"在接单"，否则升级那一刻全池一起消失。
+const receivingSQL = "(worker_receiving IS NULL OR worker_receiving = ?)"
+
+// eligibleSQL 判"可接单节点"的完整尺：管理面没停、本机也还在拉。
+// 绑定参数按 SQL 里 ? 的出现顺序传两个 true。
+const eligibleSQL = acceptingSQL + " AND " + receivingSQL
 
 // Workers 返回某 app 全部**可派单**的存活节点（按 address 排序，供可插拔负载均衡策略使用）。
 //
@@ -89,7 +117,8 @@ func (r *Registry) AliveNodes(appId string) []NodeSnapshot {
 func (r *Registry) rows(appId string, onlyAccepting bool) []protocol.WorkerInfo {
 	q := r.db.Where("app_id = ? AND last_heartbeat > ?", appId, r.deadline())
 	if onlyAccepting {
-		q = q.Where(acceptingSQL, true)
+		// 两把旗一起看：运维按停的、进程自己停拉的，都不该被选中派活。
+		q = q.Where(eligibleSQL, true, true)
 	}
 	var rows []store.WorkerNode
 	if err := q.Order("address asc").Find(&rows).Error; err != nil {
@@ -127,6 +156,29 @@ func (r *Registry) HasWorkers(appId string) (bool, error) {
 	return n > 0, err
 }
 
+// Eligibility 分开回答两件事：有没有在线节点、其中有没有"可接单"的。
+// 给两个数而不是一个布尔，是因为失败原因要告诉运维该去拉进程还是该点恢复接单——
+// "全部掉线"和"全部停单"在运维动作上完全不同，糊成一句话就白写了。
+//
+// 可接单 = 管理面没停（accept_tasks）且 worker 自己还在拉（worker_receiving）。
+// 认领热路径不用这把尺（见 HasWorkers）：已停单的节点仍要能长轮询拿到停止指令。
+func (r *Registry) Eligibility(appId string) (alive, eligible bool, err error) {
+	var a, e int64
+	if err = r.db.Model(&store.WorkerNode{}).
+		Where("app_id = ? AND last_heartbeat > ?", appId, r.deadline()).Count(&a).Error; err != nil {
+		return false, false, err
+	}
+	if a == 0 {
+		return false, false, nil
+	}
+	if err = r.db.Model(&store.WorkerNode{}).
+		Where("app_id = ? AND last_heartbeat > ? AND "+eligibleSQL, appId, r.deadline(), true, true).
+		Count(&e).Error; err != nil {
+		return true, false, err
+	}
+	return true, e > 0, nil
+}
+
 // WorkerAlive 认领某任务的节点是否仍在心跳。失联回收靠它区分"任务跑得久"与"节点没了"：
 // task 的 dispatch_time 是入队时间，单看它会把长任务误判成失联并反复重派。
 // 查询失败按"仍在"处理：宁可晚回收，也不要在一次数据库抖动里把在跑的任务重派成双跑。
@@ -145,23 +197,28 @@ func (r *Registry) WorkerAlive(appId, instanceId string) bool {
 	return n > 0
 }
 
-// Accepting 管理面是否允许该节点认领新任务（"停止接单"开关）。
+// Accepting 该节点现在能不能认领新任务：管理面旗（accept_tasks）与 worker 自报旗
+// （worker_receiving）任一明确为 false 就拦，两把旗谁也不能替对方翻回 true。
 // 停接单的节点仍要能长轮询拿停止指令，所以只挡认领、不挡请求本身。
-// 心跳行不存在（注册后首跳之前）或列为空都按"接单"处理，与 acceptingSQL 的存量兜底一致。
+// 心跳行不存在（注册后首跳之前）或任一列为空都按"接单"处理，与 acceptingSQL 的存量兜底一致。
 func (r *Registry) Accepting(appId, instanceId string) (bool, error) {
 	var rows []struct {
-		AcceptTasks *bool `gorm:"column:accept_tasks"`
+		AcceptTasks     *bool `gorm:"column:accept_tasks"`
+		WorkerReceiving *bool `gorm:"column:worker_receiving"`
 	}
-	err := r.db.Model(&store.WorkerNode{}).Select("accept_tasks").
+	err := r.db.Model(&store.WorkerNode{}).Select("accept_tasks", "worker_receiving").
 		Where("app_id = ? AND instance_id = ?", appId, instanceId).
 		Limit(1).Find(&rows).Error
 	if err != nil {
 		return false, err
 	}
-	if len(rows) == 0 || rows[0].AcceptTasks == nil {
+	if len(rows) == 0 {
 		return true, nil
 	}
-	return *rows[0].AcceptTasks, nil
+	if rows[0].AcceptTasks != nil && !*rows[0].AcceptTasks {
+		return false, nil
+	}
+	return rows[0].WorkerReceiving == nil || *rows[0].WorkerReceiving, nil
 }
 
 // NodeSnapshot 一条在线节点记录，附带最后心跳时间与存活标记，供监控面/节点抽屉直接展示。
@@ -172,6 +229,9 @@ type NodeSnapshot struct {
 	// AcceptTasks = 管理面/运维侧的接单开关。它和 WorkerInfo 里的字段不同源：
 	// 后者是节点自报的负载与身份，这一列只由控制台的按钮写。
 	AcceptTasks bool `json:"accept_tasks"`
+	// WorkerReceiving = worker 自己报的"我还在拉新任务"（nil 按 true 呈现）。
+	// 两把旗分开显示，运维才能一眼看出这台是被人停的还是进程自己停的。
+	WorkerReceiving bool `json:"worker_receiving"`
 }
 
 // All 跨项目全量快照（含已失联但还没被 Evict 的节点），按 app_id+address 排序。
@@ -236,9 +296,10 @@ func infoOf(n store.WorkerNode) protocol.WorkerInfo {
 
 func snapshotOf(n store.WorkerNode, deadline time.Time) NodeSnapshot {
 	return NodeSnapshot{
-		WorkerInfo:    infoOf(n),
-		LastHeartbeat: n.LastHeartbeat,
-		Alive:         n.LastHeartbeat.After(deadline),
-		AcceptTasks:   n.AcceptTasks,
+		WorkerInfo:      infoOf(n),
+		LastHeartbeat:   n.LastHeartbeat,
+		Alive:           n.LastHeartbeat.After(deadline),
+		AcceptTasks:     n.AcceptTasks,
+		WorkerReceiving: n.WorkerReceiving == nil || *n.WorkerReceiving,
 	}
 }

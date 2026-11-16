@@ -51,6 +51,26 @@ func TestFailOrphanedWaitingFailsWhenNoWorker(t *testing.T) {
 	}
 }
 
+// 节点都在线、但每台自己都停了拉（就是「停止节点」之后的形状）：超宽限的排队任务必须判失败，
+// 原因还要写"停止接单"——运维据此知道该点恢复按钮，而不是去拉一个本来活得好好的进程。
+func TestFailOrphanedWaitingFailsWhenWorkerStoppedReceiving(t *testing.T) {
+	st := newStore(t)
+	d := newOrphanDispatcher(t, st, "w1")
+	off := false
+	if err := d.reg.ReportReceiving("app1", "w1", &off); err != nil {
+		t.Fatal(err)
+	}
+	_, taskID := agedWaitingTask(t, st, 2*time.Minute)
+
+	if err := d.FailOrphanedWaiting(time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	task := getTask(t, st, taskID)
+	if task.Status != protocol.TaskFailed || !strings.Contains(task.Result, "停止接单") {
+		t.Fatalf("任务 = %s / %q, want FAILED + 停止接单", task.Status, task.Result)
+	}
+}
+
 // 项目还有在线节点：老任务保持排队，交给 worker 按空闲额度认领。
 func TestFailOrphanedWaitingLeavesQueueWithWorker(t *testing.T) {
 	st := newStore(t)

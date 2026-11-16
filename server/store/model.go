@@ -65,10 +65,16 @@ type WorkerNode struct {
 	// 这一列要 default:true（与上面那些"0 也是合法读数"的指标列相反）：存量行必须被认成接单中。
 	// worker 侧完全不知道这个开关的存在（不需要协议字段）：它照常长轮询，
 	// 只是认领 SQL 永远筛不到属于它的任务，于是空转到超时。
-	AcceptTasks   bool      `gorm:"default:true" json:"accept_tasks"`
-	LastHeartbeat time.Time `gorm:"index" json:"last_heartbeat"`
-	CreateTime    time.Time `json:"create_time"`
-	ModifyTime    time.Time `json:"modify_time"`
+	AcceptTasks bool `gorm:"default:true" json:"accept_tasks"`
+	// WorkerReceiving = worker 自己上报的"我还在拉新任务"，与 AcceptTasks 分权：
+	// 那一列只由管理面按钮写（心跳永不覆盖，见 registry_test 那条回归），
+	// 这一列只由心跳写，于是"运维停单"和"进程自己下线"两件事互不遮蔽，也不会互相误恢复。
+	// 用 *bool 是为老 SDK 兜底：nil = 这一跳根本没报，不是"我停了"，库里保持原值。
+	// 判"可接单"要两把旗一起看（见 registry.eligibleSQL）。
+	WorkerReceiving *bool     `gorm:"column:worker_receiving" json:"worker_receiving"`
+	LastHeartbeat   time.Time `gorm:"index" json:"last_heartbeat"`
+	CreateTime      time.Time `json:"create_time"`
+	ModifyTime      time.Time `json:"modify_time"`
 }
 
 // TokenRevoked 已消费的 jti：两类用途共用这一张表，语义是"这个 jti 用过了"。
