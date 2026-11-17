@@ -92,3 +92,26 @@ func TestConvertLegacyShellJob(t *testing.T) {
 		t.Fatalf("jobParams=%q，脚本文本没搬过来", job.JobParams)
 	}
 }
+
+// 回归：审计中间件曾按 4KiB 截断请求体再交还下游，任何超过 4KiB 的写请求
+// （任务包导入动辄几十 KB）都会被 bind 判成非法 JSON，只剩 "bad request" 可报。
+func TestImportBodyLargerThanFourKiB(t *testing.T) {
+	e := newScopeEnv(t)
+	tk := e.addUser(t, "root", "SUPER_ADMIN", "*")
+	big := strings.Repeat("x", 8<<10)
+	body := `{"app_id":"app1","jobs":[{"jobName":"big","timeExpressionType":"CRON",` +
+		`"timeExpression":"0 0 * * *","processorType":"BUILT_IN","processorInfo":"p.Big",` +
+		`"jobParams":"` + big + `"}]}`
+	r := e.post(t, "/openapi/job/import", tk, body)
+	if r.Code != protocol.CodeOK {
+		t.Fatalf("大包导入被拒：code=%d msg=%q", r.Code, r.Message)
+	}
+	items, _ := r.Data["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("导入结果条数=%d，want 1：%+v", len(items), r.Data)
+	}
+	item, _ := items[0].(map[string]any)
+	if ok, _ := item["success"].(bool); !ok {
+		t.Fatalf("大包导入失败：%v", item["reason"])
+	}
+}

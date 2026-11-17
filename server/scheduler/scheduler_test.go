@@ -256,6 +256,14 @@ func TestDailyTimeIntervalValidation(t *testing.T) {
 	if _, err := NextByType("DAILY_TIME_INTERVAL", ok, now, now); err != nil {
 		t.Fatalf("HH:mm 应被接受: %v", err)
 	}
+	// 老导出包里 interval 写成字符串：Jackson 会宽松转数字，导入路径不能因此被拒
+	quoted := `{"interval":"90","intervalUnit":"SECONDS","startTimeOfDay":"00:00:00","endTimeOfDay":"23:59:59"}`
+	if _, err := NextByType("DAILY_TIME_INTERVAL", quoted, now, now); err != nil {
+		t.Fatalf("字符串 interval 应被接受: %v", err)
+	}
+	if _, err := NextByType("DAILY_TIME_INTERVAL", `{"interval":"abc","startTimeOfDay":"09:00:00","endTimeOfDay":"18:00:00"}`, now, now); err == nil {
+		t.Fatal("非数字字符串 interval 应被拒绝")
+	}
 }
 
 func TestDailyTimeIntervalPreviewMonotonic(t *testing.T) {

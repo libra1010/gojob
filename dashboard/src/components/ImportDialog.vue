@@ -19,8 +19,7 @@ const pendingCount = computed(() => {
   const t = raw.value.trim()
   if (!t) return 0
   try {
-    const d = JSON.parse(t) as unknown
-    return Array.isArray(d) ? d.length : 1
+    return jobsOf(JSON.parse(t) as unknown)?.jobs.length ?? 0
   } catch {
     return 0
   }
@@ -47,7 +46,17 @@ function clearAll() {
   result.value = null
 }
 
-/** 一段文本 → 任务数组；单个对象也接受（单任务导出就是一个对象） */
+/** 文本 → {包所属项目, 任务数组}；认三种形状：数组、单条 JobDTO、{app_id, jobs:[...]} 整包 */
+function jobsOf(data: unknown): { appId: string; jobs: JobDTO[] } | null {
+  if (Array.isArray(data)) return { appId: '', jobs: data as JobDTO[] }
+  if (!data || typeof data !== 'object') return null
+  const o = data as { app_id?: unknown; jobs?: unknown }
+  if (Array.isArray(o.jobs)) {
+    return { appId: typeof o.app_id === 'string' ? o.app_id : '', jobs: o.jobs as JobDTO[] }
+  }
+  return { appId: '', jobs: [data as JobDTO] }
+}
+
 function parseJobs(text: string, label: string): JobDTO[] | null {
   let data: unknown
   try {
@@ -56,10 +65,15 @@ function parseJobs(text: string, label: string): JobDTO[] | null {
     ElMessage.error(`${label}：JSON 解析失败，请检查内容`)
     return null
   }
-  if (Array.isArray(data)) return data as JobDTO[]
-  if (data && typeof data === 'object') return [data as JobDTO]
-  ElMessage.error(`${label}：内容需为任务对象或任务对象数组`)
-  return null
+  const pkg = jobsOf(data)
+  if (!pkg) {
+    ElMessage.error(`${label}：内容需为任务对象、任务对象数组或 {app_id, jobs:[...]} 整包`)
+    return null
+  }
+  if (pkg.appId && props.appId && pkg.appId !== props.appId) {
+    ElMessage.warning(`${label}：任务包属于项目 ${pkg.appId}，将导入到当前项目 ${props.appId}`)
+  }
+  return pkg.jobs
 }
 
 /**
@@ -129,7 +143,7 @@ async function onSubmit() {
     @update:model-value="emit('update:modelValue', $event)"
   >
     <el-alert type="info" :closable="false" class="tip">
-      支持通用任务包格式（JobDTO 数组，camelCase）：本页面「导出」得到的 .json 可以直接导入，
+      支持通用任务包格式（JobDTO 数组，camelCase）：本页面「导出」得到的 .json 与 {app_id, jobs:[...]} 整包都可以直接导入，
       <b>PowerJob 控制台导出的任务包同样兼容</b>，一次可选多个文件（自动合并、逐条校验）。
       支持 CRON / 固定频率 / 固定延迟 / 每日固定间隔 + 单机/广播/Map/MapReduce 执行类型；
       旧的 SHELL 类型任务会被自动改写成 BUILT_IN + 官方脚本处理器（脚本正文搬到任务参数），

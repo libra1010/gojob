@@ -17,7 +17,9 @@ import (
 // 含义：在 daysOfWeek 指定的那些天里（空=每天），只在 [startTimeOfDay, endTimeOfDay]
 // 这个每日时间窗内、每 interval 触发一次；窗口外则顺延到下一个有效日的窗口起点。
 type dailyIntervalExpress struct {
-	Interval       *int64 `json:"interval"`
+	// interval 用 any：老包里有写成字符串 "3600" 的（PowerJob 的 Jackson 默认会把
+	// 数字字符串宽松转成 long），这里同样接受，见 asInt64 的注释。
+	Interval       any    `json:"interval"`
 	StartTimeOfDay string `json:"startTimeOfDay"`
 	EndTimeOfDay   string `json:"endTimeOfDay"`
 	IntervalUnit   string `json:"intervalUnit"`
@@ -33,9 +35,10 @@ const maxDailyProbeDays = 800
 func parseDailyInterval(expr string) (intervalMs int64, start, end timeOfDay, days map[int]bool, err error) {
 	var ep dailyIntervalExpress
 	if e := v2.Unmarshal([]byte(strings.TrimSpace(expr)), &ep); e != nil {
-		return 0, start, end, nil, fmt.Errorf("daily_time_interval 表达式需为 JSON 对象，got %q", expr)
+		return 0, start, end, nil, fmt.Errorf("daily_time_interval 表达式解析失败（需为 JSON 对象且字段类型正确）：%v", e)
 	}
-	if ep.Interval == nil || *ep.Interval <= 0 {
+	iv, ok := asInt64(ep.Interval)
+	if !ok || iv <= 0 {
 		return 0, start, end, nil, fmt.Errorf("daily_time_interval.interval 需为正整数，got %v", ep.Interval)
 	}
 	start, err = parseTimeOfDay(ep.StartTimeOfDay)
@@ -64,7 +67,7 @@ func parseDailyInterval(expr string) (intervalMs int64, start, end timeOfDay, da
 	if !ok {
 		return 0, start, end, nil, fmt.Errorf("daily_time_interval.intervalUnit 不支持 %q（可用 MILLISECONDS/SECONDS/MINUTES/HOURS）", ep.IntervalUnit)
 	}
-	intervalMs = *ep.Interval * mult
+	intervalMs = iv * mult
 	if intervalMs <= 0 {
 		return 0, start, end, nil, fmt.Errorf("daily_time_interval 换算后间隔必须 > 0ms")
 	}
@@ -77,6 +80,22 @@ func parseDailyInterval(expr string) (intervalMs int64, start, end timeOfDay, da
 		days[d] = true
 	}
 	return intervalMs, start, end, days, nil
+}
+
+// asInt64 接受 JSON 数字与纯数字字符串：老导出包里 interval 有写成 "3600" 的，
+// 兼容协议的 Jackson 默认会把数字字符串宽松转成 long，这里保持同样的宽容度。
+func asInt64(v any) (int64, bool) {
+	switch x := v.(type) {
+	case int64:
+		return x, true
+	case float64:
+		n := int64(x)
+		return n, float64(n) == x
+	case string:
+		n, err := strconv.ParseInt(strings.TrimSpace(x), 10, 64)
+		return n, err == nil
+	}
+	return 0, false
 }
 
 // parseTimeOfDay 接受 "HH:mm:ss" 或 "HH:mm"，与 Quartz/兼容协议的 TimeOfDay.from 解析一致。

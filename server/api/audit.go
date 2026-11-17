@@ -39,10 +39,13 @@ func (s *Server) opAudit() gin.HandlerFunc {
 			return
 		}
 
+		// 必须整份读回再原样交还：这里同时喂着审计记录和下游 handler，按 4KiB 截断
+		// 会把超过 4KiB 的写请求（任务包导入动辄几十 KB）切成非法 JSON，handler 只剩
+		// "bad request" 可报。审计侧自己会再截到 1024 字符入库，不需要在读取处限长。
 		var bodyBytes []byte
 		if c.Request.Body != nil {
-			bodyBytes, _ = io.ReadAll(io.LimitReader(c.Request.Body, 4096))
-			c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes)) // 交还给下游 handler
+			bodyBytes, _ = io.ReadAll(c.Request.Body)
+			c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 		}
 
 		rec := &respCapture{ResponseWriter: c.Writer, body: &bytes.Buffer{}}
