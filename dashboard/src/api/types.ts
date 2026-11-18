@@ -144,6 +144,8 @@ export interface WorkerNodeView extends WorkerInfo {
   alive: boolean
   /** 管理面开关。false=已停止接单：新任务不再派给它，在跑的照常执行并回报 */
   accept_tasks: boolean
+  /** worker 心跳自报"还在拉新任务"。false=进程自己停了（如 ERP 节点停止接单）；老 SDK/旧服务端不带此字段时按 true 处理 */
+  worker_receiving?: boolean
 }
 
 // ---------- 节点监控 ----------

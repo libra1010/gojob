@@ -66,10 +66,25 @@ watch(
           <el-tag :type="sdkTagType(row.sdk_type)" size="small">{{ row.sdk_type }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="接单" width="100">
+      <el-table-column label="管理接单" width="88">
         <template #default="{ row }">
-          <el-tag v-if="row.accept_tasks" type="success" size="small" effect="plain">接单中</el-tag>
-          <el-tag v-else type="warning" size="small" effect="plain">已停止接单</el-tag>
+          <el-tooltip content="控制台开关：停掉后服务端不再把新任务派给这台">
+            <el-tag v-if="row.accept_tasks" type="success" size="small" effect="plain">接单中</el-tag>
+            <el-tag v-else type="warning" size="small" effect="plain">已停止</el-tag>
+          </el-tooltip>
+        </template>
+      </el-table-column>
+      <el-table-column label="进程接单" width="88">
+        <template #default="{ row }">
+          <el-tooltip content="worker 心跳自报：进程自己停止拉取新任务（如 ERP 节点停止接单）">
+            <el-tag
+              v-if="row.worker_receiving !== false"
+              type="success"
+              size="small"
+              effect="plain"
+            >拉取中</el-tag>
+            <el-tag v-else type="warning" size="small" effect="plain">已停止</el-tag>
+          </el-tooltip>
         </template>
       </el-table-column>
       <el-table-column prop="version" label="版本" width="104" show-overflow-tooltip />
@@ -103,8 +118,8 @@ watch(
       </template>
     </el-table>
     <p class="tip">
-      「停止接单」只影响之后的派单：这台节点上正在跑的任务会继续执行并回报，广播的节点集合按
-      触发那一刻的快照算。开关落在数据库里，所以 worker 重启、副本切换都不会把它丢掉。
+      「管理接单」是控制台开关，写库、重启不丢；「进程接单」由 worker 心跳自报（ERP 的节点停止只翻这一面）。
+      两面都举着才会被派新任务：任一面「已停止」，服务端都不会再把新任务派给这台，在跑的继续执行并回报。
     </p>
   </el-drawer>
 </template>
