@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"gojob/internal/protocol"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/store"
 )
 
 func newBroadcastFixture(t *testing.T, targets []string) (*store.Store, *Scheduler, *[]uint64) {

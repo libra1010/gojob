@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"gojob/internal/protocol"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // maxUpstreamChain 依赖链长度上限。正常配置不会触及，纯粹是防御：

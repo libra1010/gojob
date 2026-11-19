@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"gojob/server/store"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // 假连接：只需要占位身份，ConnState 不碰它。

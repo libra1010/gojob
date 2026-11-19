@@ -6,7 +6,7 @@ package api
 import (
 	"testing"
 
-	"gojob/internal/protocol"
+	"github.com/libra1010/gojob/internal/protocol"
 )
 
 func exportURL(qs string) string { return "/openapi/job/export?" + qs }

@@ -15,9 +15,9 @@ import (
 	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
 
-	"gojob/internal/protocol"
-	"gojob/server/cluster"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/cluster"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // ErrJobRunning 手动触发时任务仍在执行且开启了 SkipWhenRunning。

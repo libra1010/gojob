@@ -17,8 +17,8 @@ import (
 
 	v2 "encoding/json/v2"
 
-	"gojob/internal/protocol"
-	"gojob/server/auth"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/auth"
 )
 
 // writeCodeData 带 data 的响应：428 这类"不是失败，是要你换个送法"的码需要把 challenge 一起给。

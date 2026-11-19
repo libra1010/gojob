@@ -13,7 +13,7 @@ import (
 	"errors"
 	"fmt"
 
-	"gojob/internal/protocol"
+	"github.com/libra1010/gojob/internal/protocol"
 )
 
 // 单次 map 的子任务数上限，与服务端 dispatch.maxMapBatch 同值。

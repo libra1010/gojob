@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"gojob/internal/protocol"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // 候选机器 = 在线节点 ∩ designated_workers（老式指定），再由策略从中选一台。

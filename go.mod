@@ -1,4 +1,4 @@
-module gojob
+module github.com/libra1010/gojob
 
 go 1.27
 

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"gojob/server/store"
+	"github.com/libra1010/gojob/server/store"
 )
 
 func TestSeedAdminConcurrentBoot(t *testing.T) {

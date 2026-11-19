@@ -13,8 +13,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"gojob/server/node"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/server/node"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // Owner 返回该 app 当前的调度归属副本：holder 的 node_id，以及它对 worker 可达的地址。

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"gojob/server/store"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // newTokenEnv 起一套令牌体系：真 sqlite 库（吊销基线就在库里），两个同密钥的 Signer

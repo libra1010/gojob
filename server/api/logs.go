@@ -7,8 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm/clause"
 
-	"gojob/internal/protocol"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/store"
 )
 
 const (

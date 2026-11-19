@@ -26,9 +26,9 @@ import (
 	"syscall"
 	"time"
 
-	"gojob/internal/agent"
-	"gojob/internal/protocol"
-	"gojob/worker"
+	"github.com/libra1010/gojob/internal/agent"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/worker"
 )
 
 func envOr(key, def string) string {

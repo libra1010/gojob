@@ -10,7 +10,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm/clause"
 
-	"gojob/server/store"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // Manager 控制台会话：一张 Purpose=console 的签名令牌，绑定用户名。

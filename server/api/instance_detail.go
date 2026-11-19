@@ -20,8 +20,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"gojob/internal/protocol"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // taskInfoLimit 与兼容协议那句写死的后缀 limit 10 同值。

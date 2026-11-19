@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"gojob/server/auth"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/server/auth"
+	"github.com/libra1010/gojob/server/store"
 )
 
 func newDepServer(t *testing.T) *Server {

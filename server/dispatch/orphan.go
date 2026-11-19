@@ -8,8 +8,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"gojob/internal/protocol"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // waitingSweepBatch 单次巡检最多处理多少行，避免一次长事务卡住认领热路径。

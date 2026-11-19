@@ -2,7 +2,7 @@
 > 本文的「兼容协议」= gojob 控制面刻意对齐的那套外部接口语义；对齐范围与逐条差异见根 README 的「兼容性说明」。
 
 
-gojob 的 Java Worker SDK（Maven 多模块工程，`groupId=com.gojob`，`version=0.2.0`，Java 17）。
+gojob 的 Java Worker SDK（Maven 多模块工程，`groupId=com.gojob`，`version=0.3.0`，Java 17）。
 
 业务应用引入本 SDK、注册处理器后启动，即作为 gojob Server 的一个 worker 节点执行任务：
 
@@ -25,7 +25,7 @@ gojob 的 Java Worker SDK（Maven 多模块工程，`groupId=com.gojob`，`versi
 <dependency>
     <groupId>com.gojob</groupId>
     <artifactId>gojob-worker-core</artifactId>
-    <version>0.2.0</version>
+    <version>0.3.0</version>
 </dependency>
 ```
 
@@ -56,7 +56,7 @@ worker.awaitTermination(); // 阻塞，保持 main 存活
 <dependency>
     <groupId>com.gojob</groupId>
     <artifactId>gojob-worker-spring-boot-starter</artifactId>
-    <version>0.2.0</version>
+    <version>0.3.0</version>
 </dependency>
 ```
 

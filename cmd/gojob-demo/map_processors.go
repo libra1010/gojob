@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"gojob/worker"
+	"github.com/libra1010/gojob/worker"
 )
 
 // nodeID 本机标识：广播要证明"每个在线节点各收到一份"，结果里必须带上是谁跑的。

@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"gojob/internal/registercrypto"
+	"github.com/libra1010/gojob/internal/registercrypto"
 )
 
 // 注册口令的两种送达方式。

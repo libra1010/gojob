@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-19
+
+### 变更
+
+- **Go 模块路径改为 `github.com/libra1010/gojob`**：此前 `go.mod` 声明 `module gojob`，仓库虽在 GitHub 上却无法被 `go get` 引用（模块路径与仓库路径不一致）。全仓内部 import 同步改写，worker SDK 可直接 `go get github.com/libra1010/gojob/worker@v0.3.0`
+- **SDK 版本与页面显示升到 0.3**：Go `sdkVersion=gojob-go/0.3`，控制台登录页显示 `gojob v0.3.0`，`dashboard/package.json` 与 Java SDK（`groupId=com.gojob`）同步为 0.3.0
+
+
+
 ### 新增
 
 - **品牌图标与 favicon**：新增 `dashboard/public/favicon.svg`（几何 G：环 + 下颌 + 内挑横杠一笔成形，32 格下线宽 3.4）、`favicon-32.png` 与铺底的 `apple-touch-icon.png`；`index.html` 挂上 `icon` / `alternate icon` / `apple-touch-icon` / `theme-color`，侧栏与登录页原先拿文字 "G" 顶替的品牌位改为引用同一个标记。此前项目**没有任何图标资产**（连 `public/` 都没有），浏览器标签页是浏览器默认页。定稿前对比过时钟轮与分发扇出两种构形，它们在 24px 下都糊成一团，故弃用
@@ -79,6 +88,7 @@
 - `life_cycle` 目前只能经 OpenAPI 设置，建单表单里还没有这一项
 
 [unreleased]: https://github.com/libra1010/gojob/compare/v0.2.0...HEAD
+[0.3.0]: https://github.com/libra1010/gojob/releases/tag/v0.3.0
 [0.2.0]: https://github.com/libra1010/gojob/releases/tag/v0.2.0
 
 ### 尚未实现（当前版本会明确拒绝或含糊可用）

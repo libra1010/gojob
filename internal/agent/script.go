@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"gojob/worker"
+	"github.com/libra1010/gojob/worker"
 )
 
 // ShellAliasName 是官方 Shell 处理器的 gojob 短名别名；主名用兼容协议的类全名

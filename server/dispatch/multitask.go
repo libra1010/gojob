@@ -15,8 +15,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"gojob/internal/protocol"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // 派生规模上限。兼容协议靠 worker 本地表没有显式上限（只有内存与线程池），

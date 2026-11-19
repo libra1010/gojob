@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"gojob/internal/protocol"
-	"gojob/server/registry"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/registry"
+	"github.com/libra1010/gojob/server/store"
 )
 
 func worker(appID, addr string, cores int, cpuLoad, memUsed, memMax float64, tag string) protocol.WorkerInfo {

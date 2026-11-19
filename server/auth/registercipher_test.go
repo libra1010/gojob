@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"gojob/internal/registercrypto"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/registercrypto"
+	"github.com/libra1010/gojob/server/store"
 )
 
 const (

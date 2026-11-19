@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"gojob/server/store"
+	"github.com/libra1010/gojob/server/store"
 )
 
 func newAppStore(t *testing.T) *store.Store {

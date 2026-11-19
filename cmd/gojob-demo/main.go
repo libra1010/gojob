@@ -18,7 +18,7 @@ import (
 	"syscall"
 	"time"
 
-	"gojob/worker"
+	"github.com/libra1010/gojob/worker"
 )
 
 type helloProcessor struct{}

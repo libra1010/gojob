@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"gojob/server/store"
+	"github.com/libra1010/gojob/server/store"
 )
 
 func newSignalDB(t *testing.T) *store.Store {

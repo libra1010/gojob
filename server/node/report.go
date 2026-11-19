@@ -10,7 +10,7 @@ import (
 
 	v2 "encoding/json/v2"
 
-	"gojob/server/store"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // ReportInterval 采样与跨副本上报间隔。15s（3 个周期）没心跳即判离线。

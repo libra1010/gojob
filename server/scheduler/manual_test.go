@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gojob/server/store"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // 暂停的任务不接受手动触发：认领层按 enable 硬过滤，放行只会留下一个永远拉不到的实例。

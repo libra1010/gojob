@@ -16,7 +16,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"gojob/worker"
+	"github.com/libra1010/gojob/worker"
 )
 
 type hello struct{}

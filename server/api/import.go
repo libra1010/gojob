@@ -9,9 +9,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gojob/internal/protocol"
-	"gojob/server/scheduler"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/scheduler"
+	"github.com/libra1010/gojob/server/store"
 )
 
 type jobConverter struct {

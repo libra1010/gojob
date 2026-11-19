@@ -13,8 +13,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"gojob/internal/protocol"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // Interval 是两轮扫描的间隔。清理不需要准时，需要的是"每次少删一点"——把删除摊成很多小批，

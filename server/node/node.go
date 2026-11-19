@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gojob/internal/proc"
+	"github.com/libra1010/gojob/internal/proc"
 )
 
 // HistoryLen 环形缓冲保留的采样点数；配合 ReportInterval=5s = 最近 10 分钟曲线。

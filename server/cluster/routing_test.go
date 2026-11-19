@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"gojob/server/node"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/server/node"
+	"github.com/libra1010/gojob/server/store"
 )
 
 func seedServerNode(t *testing.T, st *store.Store, nodeId, publicURL string, silent time.Duration) {

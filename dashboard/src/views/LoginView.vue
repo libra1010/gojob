@@ -72,7 +72,7 @@ async function onSubmit() {
         </div>
 
         <div class="aside-foot">
-          <span>gojob v0.2.0</span>
+          <span>gojob v0.3.0</span>
           <span class="sep" />
           <span>内部运维系统</span>
         </div>

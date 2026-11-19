@@ -8,8 +8,8 @@ import (
 	v2 "encoding/json/v2"
 	"github.com/gin-gonic/gin"
 
-	"gojob/internal/protocol"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // respCapture 包住 gin.ResponseWriter，抓下响应体以解析业务 code。

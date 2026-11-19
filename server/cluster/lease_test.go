@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"gojob/server/store"
+	"github.com/libra1010/gojob/server/store"
 )
 
 type fakeClock struct{ t time.Time }

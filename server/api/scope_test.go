@@ -13,12 +13,12 @@ import (
 
 	v2 "encoding/json/v2"
 
-	"gojob/internal/protocol"
-	"gojob/server/auth"
-	"gojob/server/dispatch"
-	"gojob/server/registry"
-	"gojob/server/scheduler"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/auth"
+	"github.com/libra1010/gojob/server/dispatch"
+	"github.com/libra1010/gojob/server/registry"
+	"github.com/libra1010/gojob/server/scheduler"
+	"github.com/libra1010/gojob/server/store"
 )
 
 type scopeEnv struct {

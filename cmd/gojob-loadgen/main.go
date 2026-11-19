@@ -33,8 +33,8 @@ import (
 
 	v2 "encoding/json/v2"
 
-	"gojob/internal/protocol"
-	"gojob/worker"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/worker"
 )
 
 // 计量的承重处：**只认本轮实例的任务**。

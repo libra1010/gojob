@@ -24,8 +24,8 @@ import (
 
 	v2 "encoding/json/v2"
 
-	"gojob/internal/protocol"
-	"gojob/internal/registercrypto"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/internal/registercrypto"
 )
 
 var (

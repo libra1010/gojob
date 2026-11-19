@@ -15,15 +15,15 @@ import (
 	// 内嵌 IANA 时区库：裸 alpine 没有 zoneinfo，缺了它 TZ=Asia/Shanghai 会被静默忽略、退回 UTC。
 	_ "time/tzdata"
 
-	"gojob/server/api"
-	"gojob/server/auth"
-	"gojob/server/cleanup"
-	"gojob/server/cluster"
-	"gojob/server/dispatch"
-	"gojob/server/node"
-	"gojob/server/registry"
-	"gojob/server/scheduler"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/server/api"
+	"github.com/libra1010/gojob/server/auth"
+	"github.com/libra1010/gojob/server/cleanup"
+	"github.com/libra1010/gojob/server/cluster"
+	"github.com/libra1010/gojob/server/dispatch"
+	"github.com/libra1010/gojob/server/node"
+	"github.com/libra1010/gojob/server/registry"
+	"github.com/libra1010/gojob/server/scheduler"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // version 由发布脚本用 -ldflags "-X main.version=$(git describe --tags)" 盖进二进制；

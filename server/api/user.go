@@ -5,9 +5,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gojob/internal/protocol"
-	"gojob/server/auth"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/auth"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // requireLogin 保护管理面接口：Authorization: Bearer <token> 或 X-GoJob-Token 头。

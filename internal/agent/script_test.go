@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"gojob/worker"
+	"github.com/libra1010/gojob/worker"
 )
 
 // markEnv 是测试脚本用来报告"我确实跑了、参数是什么"的通道：处理器的日志管道在单测里不存在，

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"gojob/internal/protocol"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // probeWorkerState 探针桩：alive=有没有在线节点，eligible=其中有没有可接单的。

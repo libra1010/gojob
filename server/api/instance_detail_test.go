@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"gojob/internal/protocol"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // customQuery 是控制台里用户能自由输入、又被直接拿去查库的唯一入口。

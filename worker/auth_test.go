@@ -16,7 +16,7 @@ import (
 
 	v2 "encoding/json/v2"
 
-	"gojob/internal/protocol"
+	"github.com/libra1010/gojob/internal/protocol"
 )
 
 type fakeServer struct {

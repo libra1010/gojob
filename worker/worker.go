@@ -24,15 +24,15 @@ import (
 
 	v2 "encoding/json/v2"
 
-	"gojob/internal/protocol"
-	"gojob/internal/registercrypto"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/internal/registercrypto"
 )
 
 // sdkVersion 上报给服务端的本 SDK 版本（心跳与注册共用）。
 // defaultTokenTTL 服务端没回 ttl_seconds 时的兜底（老版本服务端）。
 const defaultTokenTTL = 10 * time.Minute
 
-const sdkVersion = "gojob-go/0.2"
+const sdkVersion = "gojob-go/0.3"
 
 // TaskContext 传给处理器的执行上下文（对标兼容协议的 JobContext 子集）。
 type TaskContext struct {

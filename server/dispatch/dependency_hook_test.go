@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"gojob/internal/protocol"
-	"gojob/server/registry"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/registry"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // addRunningTask 往既有实例上再挂一条 RUNNING 任务。

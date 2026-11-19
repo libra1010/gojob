@@ -5,9 +5,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gojob/internal/protocol"
-	"gojob/server/auth"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/auth"
+	"github.com/libra1010/gojob/server/store"
 )
 
 const timeLayout = "2006-01-02 15:04:05"

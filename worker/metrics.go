@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"gojob/internal/proc"
-	"gojob/internal/protocol"
+	"github.com/libra1010/gojob/internal/proc"
+	"github.com/libra1010/gojob/internal/protocol"
 )
 
 // fillRuntime 把本进程运行时指标填进心跳包，供控制台的节点监控页展示。

@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"gojob/internal/protocol"
-	"gojob/server/registry"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/registry"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // agedWaitingTask 造一个"实例 WAITING + 单任务 WAITING"的行，并把 dispatch_time 推到过去。

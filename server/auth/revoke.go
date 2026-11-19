@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"gojob/server/store"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // RevocationCacheTTL 吊销基线的进程内缓存时长。

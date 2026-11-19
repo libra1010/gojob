@@ -9,11 +9,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"gojob/internal/protocol"
-	"gojob/server/auth"
-	"gojob/server/cluster"
-	"gojob/server/scheduler"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/auth"
+	"github.com/libra1010/gojob/server/cluster"
+	"github.com/libra1010/gojob/server/scheduler"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // ---------- App（项目）管理 ----------

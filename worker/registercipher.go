@@ -10,8 +10,8 @@ import (
 	"errors"
 	"fmt"
 
-	"gojob/internal/protocol"
-	"gojob/internal/registercrypto"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/internal/registercrypto"
 )
 
 // sealRegister 握手两步：领一张一次性 challenge，把口令封进 AES-256-GCM 密文。

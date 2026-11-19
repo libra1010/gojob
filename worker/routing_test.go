@@ -14,7 +14,7 @@ import (
 
 	v2 "encoding/json/v2"
 
-	"gojob/internal/protocol"
+	"github.com/libra1010/gojob/internal/protocol"
 )
 
 // hintServer 一个最小可用的假副本：注册发 token，心跳按当前设定回集群提示。

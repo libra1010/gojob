@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"gojob/server/store"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // 端到端守住"每日固定间隔真的会产出实例"：单测只覆盖 NextByType 的时间计算，

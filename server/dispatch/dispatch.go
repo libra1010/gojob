@@ -13,10 +13,10 @@ import (
 
 	"gorm.io/gorm"
 
-	"gojob/internal/protocol"
-	"gojob/server/cluster"
-	"gojob/server/registry"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/cluster"
+	"github.com/libra1010/gojob/server/registry"
+	"github.com/libra1010/gojob/server/store"
 )
 
 var ErrNoWorker = errors.New("no alive worker for app")

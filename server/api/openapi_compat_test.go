@@ -11,8 +11,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gojob/server/auth"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/server/auth"
+	"github.com/libra1010/gojob/server/store"
 )
 
 const pjAuthPlain = "demo123"

@@ -9,9 +9,9 @@ import (
 
 	v2 "encoding/json/v2"
 
-	"gojob/internal/protocol"
-	"gojob/server/node"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/node"
+	"github.com/libra1010/gojob/server/store"
 )
 
 func getAs[T any](t *testing.T, e *workerEnv, path, token string) protocol.Resp[T] {

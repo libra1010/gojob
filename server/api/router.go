@@ -18,14 +18,14 @@ import (
 	v2 "encoding/json/v2"
 	"github.com/gin-gonic/gin"
 
-	"gojob/internal/protocol"
-	"gojob/server/auth"
-	"gojob/server/cluster"
-	"gojob/server/dispatch"
-	"gojob/server/registry"
-	"gojob/server/scheduler"
-	"gojob/server/store"
-	"gojob/server/webui"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/auth"
+	"github.com/libra1010/gojob/server/cluster"
+	"github.com/libra1010/gojob/server/dispatch"
+	"github.com/libra1010/gojob/server/registry"
+	"github.com/libra1010/gojob/server/scheduler"
+	"github.com/libra1010/gojob/server/store"
+	"github.com/libra1010/gojob/server/webui"
 )
 
 type Server struct {

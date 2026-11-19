@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"gojob/internal/protocol"
-	"gojob/server/registry"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/registry"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // 回归：dispatch_time 是入队时间，不是"失联时长"。节点每 5s 还在心跳、只是任务跑得久，

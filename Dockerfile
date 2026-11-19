@@ -3,7 +3,7 @@
 # docker build --build-arg BUILD_TARGET=gojob-demo   -t gojob/gojob-demo:latest .
 # docker build --build-arg BUILD_TARGET=gojob-agent  -t gojob/gojob-agent:latest .
 # 版本戳由发布脚本传进来（git tag），便于在容器里用 -version 核对跑的是哪一版：
-#   --build-arg GOJOB_VERSION=v0.2.0
+#   --build-arg GOJOB_VERSION=v0.3.0
 FROM golang:1.27-alpine AS build
 ARG BUILD_TARGET=gojob-server
 ARG GOJOB_VERSION=dev

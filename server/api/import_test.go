@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"gojob/internal/protocol"
+	"github.com/libra1010/gojob/internal/protocol"
 )
 
 func sp(s string) *string { return &s }

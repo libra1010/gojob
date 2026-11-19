@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gojob/internal/protocol"
+	"github.com/libra1010/gojob/internal/protocol"
 )
 
 const (

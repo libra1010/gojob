@@ -7,7 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"gojob/server/store"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // SignalPollInterval 副本轮询入队信号的周期。

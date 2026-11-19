@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"gojob/server/cluster"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/server/cluster"
+	"github.com/libra1010/gojob/server/store"
 )
 
 type clusterFixture struct {

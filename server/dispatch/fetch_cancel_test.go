@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"gojob/internal/protocol"
-	"gojob/server/registry"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/registry"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // TestFetchWakesOnlyForFreshCancels 守住"cancel 未 ack 期间长轮询退化成忙等"这个回归。

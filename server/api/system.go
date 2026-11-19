@@ -7,10 +7,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"gojob/internal/protocol"
-	"gojob/server/cluster"
-	"gojob/server/node"
-	"gojob/server/store"
+	"github.com/libra1010/gojob/internal/protocol"
+	"github.com/libra1010/gojob/server/cluster"
+	"github.com/libra1010/gojob/server/node"
+	"github.com/libra1010/gojob/server/store"
 )
 
 // serverView 一个调度中心副本。Samples 是最近 HistoryLen 个采样点（约 10 分钟）。

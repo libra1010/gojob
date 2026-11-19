@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"gojob/internal/protocol"
+	"github.com/libra1010/gojob/internal/protocol"
 )
 
 // cancelBeforeStart 复现"停止指令在处理器拿到任务之前就到了"这个现场：
